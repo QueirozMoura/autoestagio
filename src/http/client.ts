@@ -17,7 +17,7 @@ import { RETRYABLE_STATUS, backoffDelay, parseRetryAfter } from './retry.js';
 
 export type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
 
-export const DEFAULT_USER_AGENT = 'AutoEstagio/0.1 (uso pessoal; coleta com limite de requisições)';
+export const DEFAULT_USER_AGENT = 'AutoEstagio/0.1 (uso pessoal; coleta com limite de requisicoes)';
 
 export interface HttpClientOptions {
   fetch?: FetchLike;

@@ -119,12 +119,14 @@ describe('configuração dos alvos e registro padrão', () => {
     ).toHaveLength(1);
   });
 
-  it('o registro padrão tem Greenhouse e Lever, e nenhum outro adaptador', () => {
-    expect(createDefaultRegistry().kinds()).toEqual(['greenhouse', 'lever']);
+  it('o registro padrão tem Greenhouse, Lever e Ashby, e nenhum outro adaptador', () => {
+    expect(createDefaultRegistry().kinds()).toEqual(['ashby', 'greenhouse', 'lever']);
   });
 
   it('alvos de plataformas sem adaptador falham antes de qualquer requisição', () => {
-    const config = parseSourcesConfig({ targets: [{ kind: 'ashby', slug: 'x', name: 'X' }] });
+    const config = parseSourcesConfig({
+      targets: [{ kind: 'smartrecruiters', slug: 'x', name: 'X' }],
+    });
     expect(() => createDefaultRegistry().create(config)).toThrow(SourceConfigError);
   });
 });

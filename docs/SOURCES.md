@@ -32,6 +32,35 @@ Registro do que foi verificado antes de implementar cada adaptador. Data da veri
 - **Formato:** traz `workplaceType` (`remote`, `hybrid`, `on-site`, `unspecified`), `country` e a
   descrição já em HTML. `unspecified` nunca é convertido em modalidade.
 
+## Ashby (adaptador `ashby`)
+
+- **Endpoint:** `GET https://api.ashbyhq.com/posting-api/job-board/{JOB_BOARD_NAME}?includeCompensation=true`
+  (o nome é o último trecho de `jobs.ashbyhq.com/{nome}`; é sensível a maiúsculas na URL exibida,
+  mas a API respondeu igual nos testes). Um quadro vem inteiro em uma resposta, sem paginação.
+- **Acesso:** documentação oficial (<https://developers.ashbyhq.com/docs/public-job-posting-api>).
+  Não documenta autenticação nem limites de taxa; na prática, as respostas foram `200` sem
+  credenciais e `404` para quadros inexistentes. O projeto mantém 1 requisição a cada 2 s por host.
+- **robots.txt:** `api.ashbyhq.com/robots.txt` responde `401` (2026-10-22), tratado como "sem arquivo"
+  (RFC 9309, 4xx). O `jobs.ashbyhq.com/robots.txt` (outro host) bloqueia `/api/`, o que não
+  afeta o endpoint usado aqui.
+- **Formato:** `jobs[]` com `title`, `location`, `secondaryLocations`, `address.postalAddress`,
+  `isListed`, `isRemote`, `workplaceType` (`OnSite`/`Remote`/`Hybrid`), `employmentType`
+  (`FullTime`/`PartTime`/`Intern`/`Contract`/`Temporary`), `descriptionHtml`/`descriptionPlain`,
+  `publishedAt`, `jobUrl`, `applyUrl` e `compensation` (dentro de cada vaga, não no topo).
+- **Regras do adaptador:** estágio = `employmentType == Intern` **ou** título de estágio (há
+  quadros em que "Product Intern" vem como `FullTime`); `isListed: false` é descartado; campo
+  ausente nunca vira valor presumido; `applyUrl` é guardado em `jobs.apply_url` (migração 0003).
+- **Lição:** o `User-Agent` precisa ser ASCII. Com acentos o WAF (Cloudflare) devolvia 403 ao
+  cliente Node; o `User-Agent` do projeto foi corrigido (continua identificando o projeto).
+
+Quadros verificados (200) em 2026-10-22: `enter-ai`, `nubank`, `Skydropx`, `double`, `canals`,
+`Luzid`, `telepatia`. Estágio no Brasil hoje: **só a Enter** (Programa de Estágio 2027 e
+Product Intern, ambos em São Paulo, presenciais). O Nubank tem 1 `Intern`, mas nos EUA; o
+Programa de Estágio Nubank 2027 e o estágio de TI da Skydropx/Frenet, vistos em buscas, **não
+estão mais na API**. Slugs testados e inexistentes (404): quintoandar, vtex, ebanx, creditas,
+cloudwalk, hotmart, dock, pagarme, agibank, clara, kovi, frenet; `loft`, `neon` e `deel` existem
+mas não têm estágio.
+
 ## O que cada adaptador faz e não faz
 
 - Só `GET`. Sem login, sem cookies, sem chave de API, sem tocar em candidatura.

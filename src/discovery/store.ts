@@ -123,11 +123,11 @@ export class JobStore {
     const result = this.db
       .prepare(
         `INSERT INTO jobs (
-           source_id, external_id, url, canonical_url, title, company, location, work_mode,
+           source_id, external_id, url, canonical_url, apply_url, title, company, location, work_mode,
            stipend_amount, stipend_max, stipend_currency, stipend_text, description, posted_at,
            content_hash, identity_key, first_seen_at, last_seen_at, updated_at
          ) VALUES (
-           @sourceId, @externalId, @url, @canonicalUrl, @title, @company, @location, @workMode,
+           @sourceId, @externalId, @url, @canonicalUrl, @applyUrl, @title, @company, @location, @workMode,
            @stipendMin, @stipendMax, @stipendCurrency, @stipendText, @description, @postedAt,
            @contentHash, @identityKey, @now, @now, @now
          )`,
@@ -170,7 +170,7 @@ export class JobStore {
     this.db
       .prepare(
         `UPDATE jobs SET
-           url = @url, canonical_url = @canonicalUrl, title = @title, company = @company,
+           url = @url, canonical_url = @canonicalUrl, apply_url = @applyUrl, title = @title, company = @company,
            location = @location, work_mode = @workMode, stipend_amount = @stipendMin,
            stipend_max = @stipendMax, stipend_currency = @stipendCurrency,
            stipend_text = @stipendText, description = @description, posted_at = @postedAt,
@@ -186,6 +186,7 @@ export class JobStore {
     this.db
       .prepare(
         `UPDATE jobs SET
+           apply_url = COALESCE(apply_url, @applyUrl),
            company = COALESCE(company, @company),
            location = COALESCE(location, @location),
            work_mode = COALESCE(work_mode, @workMode),

@@ -51,7 +51,8 @@ Os números das fases seguem o roteiro do README e podem ser reordenados com aut
 
 - [x] Cliente HTTP com timeout, retry, `Retry-After`, rate limit por host e `robots.txt` (2.1).
 - [x] Adaptadores independentes e testados com dados simulados (Greenhouse e Lever, 2.3).
-- [ ] Demais adaptadores: Ashby, SmartRecruiters, páginas de carreiras e Gupy (após revisão dos termos).
+- [x] Ashby (Etapa 2.4A)
+- [ ] Demais adaptadores: SmartRecruiters, páginas de carreiras e Gupy (após revisão dos termos).
 - [x] Normalização, deduplicação e persistência de vagas entre fontes (2.2, com fontes simuladas).
 
 ### Análise e elegibilidade

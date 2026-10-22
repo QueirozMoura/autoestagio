@@ -1,3 +1,4 @@
+import { AshbySource } from './ashby.js';
 import { GreenhouseSource } from './greenhouse.js';
 import { LeverSource } from './lever.js';
 import { SourceRegistry } from './registry.js';
@@ -9,5 +10,6 @@ import { SourceRegistry } from './registry.js';
 export function createDefaultRegistry(): SourceRegistry {
   return new SourceRegistry()
     .register('greenhouse', (target) => new GreenhouseSource(target))
-    .register('lever', (target) => new LeverSource(target));
+    .register('lever', (target) => new LeverSource(target))
+    .register('ashby', (target) => new AshbySource(target));
 }

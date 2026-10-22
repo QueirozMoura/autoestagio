@@ -15,6 +15,8 @@ export const rawJobSchema = z.object({
   /** Identificador estável da vaga na fonte, quando existir. */
   externalId: z.string().min(1).optional(),
   url: z.url(),
+  /** Página de candidatura, quando a fonte a informa separada da página da vaga. */
+  applyUrl: z.url().optional(),
   title: z.string().min(1),
   company: z.string().min(1).optional(),
   location: z.string().min(1).optional(),

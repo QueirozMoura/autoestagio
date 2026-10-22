@@ -283,3 +283,21 @@ describe('normalizeJob', () => {
     expect(() => normalizeJob(raw({ url: 'ftp://x.test/a' }))).toThrow(NormalizationError);
   });
 });
+
+describe('normalizeJob — applyUrl', () => {
+  const base = { url: 'https://jobs.exemplo.com/1', title: 'Estagiário' };
+
+  it('preserva a URL de candidatura HTTP/HTTPS e descarta valores inválidos', () => {
+    expect(normalizeJob({ ...base, applyUrl: 'https://jobs.exemplo.com/1/apply' }).applyUrl).toBe(
+      'https://jobs.exemplo.com/1/apply',
+    );
+    expect(normalizeJob({ ...base, applyUrl: 'javascript:alert(1)' }).applyUrl).toBeNull();
+    expect(normalizeJob(base).applyUrl).toBeNull();
+  });
+
+  it('não altera o hash de conteúdo (vagas já gravadas não viram "atualizadas")', () => {
+    expect(
+      normalizeJob({ ...base, applyUrl: 'https://jobs.exemplo.com/1/apply' }).contentHash,
+    ).toBe(normalizeJob(base).contentHash);
+  });
+});

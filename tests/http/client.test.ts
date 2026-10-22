@@ -409,3 +409,10 @@ describe('HttpClient — redirecionamentos', () => {
     await expect(client.getText(URL_A)).rejects.toBeInstanceOf(TooManyRedirectsError);
   });
 });
+
+describe('DEFAULT_USER_AGENT', () => {
+  it('é ASCII puro: WAFs recusam cabeçalhos com outros caracteres (regressão da Ashby)', async () => {
+    const { DEFAULT_USER_AGENT } = await import('../../src/http/index.js');
+    expect(DEFAULT_USER_AGENT).toMatch(/^[\x20-\x7e]+$/);
+  });
+});

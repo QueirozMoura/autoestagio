@@ -9,12 +9,15 @@ import {
 import { FakeClock, mockFetch, textResponse, type Handler } from './mock-fetch.js';
 
 export const GH_ROBOTS = 'https://boards-api.greenhouse.io/robots.txt';
+export const AB_ROBOTS = 'https://api.ashbyhq.com/robots.txt';
 export const LV_ROBOTS = 'https://api.lever.co/robots.txt';
 
-/** robots.txt reais das duas plataformas (verificados em 2026-10-22), para os testes. */
+/** robots.txt reais das plataformas (verificados em 2026-10-22), para os testes. */
 export const robotsRoutes: Record<string, Handler> = {
   [GH_ROBOTS]: () => textResponse('User-agent: *\nDisallow: /embed/'),
   [LV_ROBOTS]: () => textResponse('User-agent: *\nAllow: /\nCrawl-delay: 1'),
+  // O host da API da Ashby responde 401 ao robots.txt (verificado em 2026-10-22): sem arquivo.
+  [AB_ROBOTS]: () => textResponse('Unauthorized', { status: 401 }),
   'https://api.eu.lever.co/robots.txt': () =>
     textResponse('User-agent: *\nAllow: /\nCrawl-delay: 1'),
 };

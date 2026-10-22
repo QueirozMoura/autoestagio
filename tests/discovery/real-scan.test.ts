@@ -190,3 +190,81 @@ describe('runRealScan — integração com SQLite e dedup', () => {
     });
   });
 });
+
+describe('runRealScan — Ashby (SQLite, idempotência e isolamento)', () => {
+  const AB = 'https://api.ashbyhq.com/posting-api/job-board/delta?includeCompensation=true';
+  const abConfig = parseSourcesConfig({
+    targets: [
+      { kind: 'ashby', slug: 'delta', name: 'Empresa Delta' },
+      { kind: 'greenhouse', slug: 'beta', name: 'Empresa Beta' },
+    ],
+  });
+  const abJob = (id: string, title: string, extra: Record<string, unknown> = {}) => ({
+    id,
+    title,
+    employmentType: 'Intern',
+    location: 'São Paulo',
+    isListed: true,
+    workplaceType: 'Remote',
+    publishedAt: '2026-10-01T09:00:00.000+00:00',
+    jobUrl: `https://jobs.ashbyhq.com/delta/${id}`,
+    applyUrl: `https://jobs.ashbyhq.com/delta/${id}/application`,
+    descriptionPlain: 'Estágio em desenvolvimento de software.',
+    ...extra,
+  });
+  const abRoutes = (jobs: unknown[]) => ({
+    [AB]: () => jsonResponse({ apiVersion: '1', jobs }),
+    [GH_OTHER]: () => jsonResponse({ jobs: [ghListed(9, 'Estagiário QA', 'São Paulo')] }),
+    'https://boards-api.greenhouse.io/v1/boards/beta/jobs/9': () =>
+      jsonResponse({ ...ghListed(9, 'Estagiário QA', 'São Paulo'), content: 'Testes' }),
+  });
+
+  let db: Db;
+  beforeEach(() => {
+    db = openDatabase(IN_MEMORY);
+    runMigrations(db);
+  });
+  const count = (sql: string): number => (db.prepare(sql).get() as { n: number }).n;
+
+  it('grava a vaga com a URL de candidatura e é idempotente', async () => {
+    const jobs = [
+      abJob('j1', 'Estagiário Dev'),
+      abJob('j2', 'Estágio em Dados', { isListed: false }),
+    ];
+    const first = await runRealScan({ db, config: abConfig, http: setup(abRoutes(jobs)).client });
+    expect(first.totals).toMatchObject({ found: 2, new: 2, failed: 0 }); // 1 Ashby + 1 Greenhouse
+    expect(
+      db.prepare("SELECT url, apply_url, work_mode FROM jobs WHERE external_id = 'j1'").get(),
+    ).toEqual({
+      url: 'https://jobs.ashbyhq.com/delta/j1',
+      apply_url: 'https://jobs.ashbyhq.com/delta/j1/application',
+      work_mode: 'remoto',
+    });
+    expect(count("SELECT COUNT(*) AS n FROM jobs WHERE external_id = 'j2'")).toBe(0); // oculta
+
+    const second = await runRealScan({ db, config: abConfig, http: setup(abRoutes(jobs)).client });
+    expect(second.totals).toMatchObject({ new: 0, updated: 0, duplicates: 2 });
+    expect(count('SELECT COUNT(*) AS n FROM jobs')).toBe(2);
+  });
+
+  it('a mesma vaga repetida no quadro não duplica', async () => {
+    const dup = abJob('j1', 'Estagiário Dev');
+    const report = await runRealScan({
+      db,
+      config: abConfig,
+      http: setup(abRoutes([dup, dup])).client,
+    });
+    expect(report.totals.new).toBe(2); // Ashby (1) + Greenhouse (1)
+    expect(count("SELECT COUNT(*) AS n FROM jobs WHERE external_id = 'j1'")).toBe(1);
+  });
+
+  it('403 na Ashby não impede as demais fontes', async () => {
+    const report = await runRealScan({
+      db,
+      config: abConfig,
+      http: setup({ ...abRoutes([]), [AB]: () => textResponse('', { status: 403 }) }).client,
+    });
+    expect(report.sources.map((s) => s.errorCategory)).toEqual(['blocked', null]);
+    expect(count('SELECT COUNT(*) AS n FROM jobs')).toBe(1);
+  });
+});

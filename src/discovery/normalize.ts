@@ -14,6 +14,8 @@ export interface NormalizedJob {
   /** URL como veio da fonte. */
   url: string;
   canonicalUrl: string;
+  /** Página de candidatura informada pela fonte (HTTP/HTTPS), ou `null`. */
+  applyUrl: string | null;
   title: string;
   titleKey: string;
   company: string | null;
@@ -99,6 +101,16 @@ export function locationKeyOf(location: string): string {
     .join(' ');
 }
 
+function httpUrlOrNull(value: string | undefined): string | null {
+  if (value === undefined) return null;
+  try {
+    const { protocol } = new URL(value.trim());
+    return protocol === 'https:' || protocol === 'http:' ? value.trim() : null;
+  } catch {
+    return null;
+  }
+}
+
 function sha256(value: string): string {
   return createHash('sha256').update(value).digest('hex');
 }
@@ -161,6 +173,7 @@ export function normalizeJob(raw: RawJob): NormalizedJob {
     externalId: raw.externalId ?? null,
     url: raw.url.trim(),
     canonicalUrl,
+    applyUrl: httpUrlOrNull(raw.applyUrl),
     title,
     titleKey,
     company,

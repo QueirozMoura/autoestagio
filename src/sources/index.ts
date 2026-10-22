@@ -27,6 +27,7 @@ export {
   type SourceRunStats,
 } from './types.js';
 export { createDefaultRegistry } from './adapters.js';
+export { AshbySource } from './ashby.js';
 export { GreenhouseSource } from './greenhouse.js';
 export { LeverSource } from './lever.js';
 export { isBrazilLocation, isInternshipTitle, isItRelated } from './filters.js';
