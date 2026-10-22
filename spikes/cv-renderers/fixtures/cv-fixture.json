@@ -1,0 +1,693 @@
+{
+  "schemaVersion": 1,
+  "language": "pt-BR",
+  "master": {
+    "sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+    "label": "curriculo-ficticio-mestre.pdf",
+    "extractedAt": "2026-10-22"
+  },
+  "identity": {
+    "name": "Maria Exemplo da Silva",
+    "headline": {
+      "id": "headline",
+      "required": true,
+      "priority": 50,
+      "variants": [
+        {
+          "id": "headline-dev",
+          "text": {
+            "pt-BR": "Estágio em Tecnologia da Informação (TI) — Desenvolvedora Full Stack"
+          },
+          "areas": [
+            "desenvolvimento"
+          ],
+          "technologies": [],
+          "sourceRef": {
+            "section": "cabecalho",
+            "excerptSha256": "699bce4e1e8812bc7da5cbc66da6d91b344b2866a423365f1586cc196ce4ea28"
+          },
+          "approvedAt": "2026-10-22"
+        },
+        {
+          "id": "headline-qa",
+          "text": {
+            "pt-BR": "Estágio em TI — Qualidade de Software (QA) e Testes Automatizados"
+          },
+          "areas": [
+            "qa"
+          ],
+          "technologies": [],
+          "sourceRef": {
+            "section": "cabecalho",
+            "excerptSha256": "0f05f6c4ec9ad8caabc5f242957f4093175f5bc35b02b71b27a7bc3c3bb0bffd"
+          },
+          "approvedAt": "2026-10-22"
+        }
+      ]
+    },
+    "location": "São Paulo, SP",
+    "contacts": [
+      {
+        "id": "email",
+        "kind": "email",
+        "value": "maria.exemplo@example.com"
+      },
+      {
+        "id": "telefone",
+        "kind": "telefone",
+        "value": "(11) 90000-0000"
+      }
+    ],
+    "links": [
+      {
+        "id": "link-linkedin",
+        "label": "LinkedIn",
+        "url": "https://www.example.com/maria-exemplo/linkedin",
+        "confirmedByUser": false
+      },
+      {
+        "id": "link-github",
+        "label": "GitHub",
+        "url": "https://www.example.com/maria-exemplo/github",
+        "confirmedByUser": false
+      },
+      {
+        "id": "link-portfolio",
+        "label": "Portfólio",
+        "url": "https://maria-exemplo.example.com/",
+        "confirmedByUser": false
+      }
+    ]
+  },
+  "summary": {
+    "id": "resumo",
+    "required": true,
+    "priority": 50,
+    "variants": [
+      {
+        "id": "resumo-dev",
+        "text": {
+          "pt-BR": "Desenvolvedora Full Stack com três sistemas fictícios em produção usados por cerca de 100 pessoas, incluindo uma plataforma comercial que gera vendas reais para uma oficina. Experiência com SaaS multiempresa, integridade de dados em transações concorrentes, testes automatizados e segurança, usando React, TypeScript, Node.js e PostgreSQL. Estudante de Análise e Desenvolvimento de Sistemas e Técnica em Desenvolvimento de Sistemas."
+        },
+        "areas": [
+          "desenvolvimento"
+        ],
+        "technologies": [
+          "React",
+          "TypeScript",
+          "Node.js",
+          "PostgreSQL"
+        ],
+        "sourceRef": {
+          "section": "resumo",
+          "excerptSha256": "3320fbe4d805d92cac8fc772d08a84b89546dbaec743c57714c36c0ca458f817"
+        },
+        "approvedAt": "2026-10-22"
+      },
+      {
+        "id": "resumo-qa",
+        "text": {
+          "pt-BR": "Estudante de Análise e Desenvolvimento de Sistemas com foco em qualidade: mais de 500 testes automatizados (unitários, de integração e E2E) em projetos fictícios, com CI/CD no GitHub Actions. Experiência em React, TypeScript, Node.js e PostgreSQL."
+        },
+        "areas": [
+          "qa"
+        ],
+        "technologies": [
+          "React",
+          "TypeScript",
+          "Node.js",
+          "PostgreSQL"
+        ],
+        "sourceRef": {
+          "section": "resumo",
+          "excerptSha256": "1a5396330bf7010a71d99def31263ecded5ad786dba20da13c1d3258b7dd1138"
+        },
+        "approvedAt": "2026-10-22"
+      }
+    ]
+  },
+  "experience": [
+    {
+      "id": "exp-oficina",
+      "kind": "experiencia",
+      "title": {
+        "pt-BR": "Oficina Exemplo Ltda. — Desenvolvedora Full Stack (projeto para empresa real)"
+      },
+      "period": {
+        "start": "2026"
+      },
+      "bullets": [
+        {
+          "id": "exp-oficina-b1",
+          "required": false,
+          "priority": 50,
+          "variants": [
+            {
+              "id": "exp-oficina-b1-a",
+              "text": {
+                "pt-BR": "Desenvolvi e mantenho em produção uma plataforma comercial com painel administrativo, gestão de ordens de serviço e e-commerce, usada em média por 40 pessoas e gerando vendas recorrentes todos os meses via API de pagamentos."
+              },
+              "areas": [],
+              "technologies": [],
+              "sourceRef": {
+                "section": "experiencia",
+                "excerptSha256": "ecbe8cd0cc841667f359167e22c94108f043d41bdb228206f4eea30fbc8c5c88"
+              },
+              "approvedAt": "2026-10-22"
+            },
+            {
+              "id": "exp-oficina-b1-b",
+              "text": {
+                "pt-BR": "Plataforma comercial em produção (painel administrativo, ordens de serviço e e-commerce), com vendas recorrentes todos os meses."
+              },
+              "areas": [],
+              "technologies": [],
+              "sourceRef": {
+                "section": "experiencia",
+                "excerptSha256": "c859a2dd8c8393a402e468fe490617e47ad097a2a355740fe7579ddf4ee8cf38"
+              },
+              "approvedAt": "2026-10-22"
+            }
+          ]
+        },
+        {
+          "id": "exp-oficina-b2",
+          "required": false,
+          "priority": 50,
+          "variants": [
+            {
+              "id": "exp-oficina-b2-a",
+              "text": {
+                "pt-BR": "Implementei autenticação JWT, webhooks, validação HMAC e camadas de segurança (Helmet, CSP, Rate Limiting); deploy em produção com estabilidade contínua para clientes reais."
+              },
+              "areas": [],
+              "technologies": [],
+              "sourceRef": {
+                "section": "experiencia",
+                "excerptSha256": "8185149497512a281c86bd7219515cbc5e1285a98295dae226f5497648680f94"
+              },
+              "approvedAt": "2026-10-22"
+            }
+          ]
+        }
+      ],
+      "technologies": [
+        "React",
+        "Node.js",
+        "Express",
+        "PostgreSQL",
+        "Prisma ORM",
+        "Tailwind CSS"
+      ],
+      "links": [
+        {
+          "id": "exp-oficina-demo",
+          "label": "Demo",
+          "url": "https://oficina-exemplo.example.com/demo",
+          "confirmedByUser": false
+        }
+      ],
+      "priority": 90,
+      "sourceRef": {
+        "section": "experiencia",
+        "excerptSha256": "0aec0b5b861e5c3185b91ac349c3348c076044bfff2f7f8a33a67b144d7f8f7e"
+      }
+    },
+    {
+      "id": "exp-ordemfacil",
+      "kind": "experiencia",
+      "title": {
+        "pt-BR": "OrdemFácil — SaaS para Oficinas (projeto autoral)"
+      },
+      "period": {
+        "start": "2026"
+      },
+      "bullets": [
+        {
+          "id": "exp-ordemfacil-b1",
+          "required": false,
+          "priority": 50,
+          "variants": [
+            {
+              "id": "exp-ordemfacil-b1-a",
+              "text": {
+                "pt-BR": "Desenvolvi um SaaS multiempresa, usado em média por 20 pessoas, para gestão de ordens de serviço, orçamentos, pagamentos e garantias, com isolamento de dados por empresa e controle de acesso por papel."
+              },
+              "areas": [],
+              "technologies": [],
+              "sourceRef": {
+                "section": "experiencia",
+                "excerptSha256": "5e9c486e6edb2ddc461d93c9cbd814bdaa1bfad72d7284a575e4336c86bb7da8"
+              },
+              "approvedAt": "2026-10-22"
+            }
+          ]
+        },
+        {
+          "id": "exp-ordemfacil-b2",
+          "required": false,
+          "priority": 50,
+          "variants": [
+            {
+              "id": "exp-ordemfacil-b2-a",
+              "text": {
+                "pt-BR": "Garanti a integridade financeira com valores em Decimal, transações com bloqueio de linha (SELECT FOR UPDATE) contra condições de corrida e chave de idempotência nos pagamentos."
+              },
+              "areas": [
+                "desenvolvimento",
+                "banco-de-dados"
+              ],
+              "technologies": [],
+              "sourceRef": {
+                "section": "experiencia",
+                "excerptSha256": "c163aac34fe012b393ca7d3ea3c7da85cfa12146b51e82cbc53c462244c82d59"
+              },
+              "approvedAt": "2026-10-22"
+            },
+            {
+              "id": "exp-ordemfacil-b2-qa",
+              "text": {
+                "pt-BR": "Testes unitários, de integração com PostgreSQL real e E2E com Playwright, com CI no GitHub Actions."
+              },
+              "areas": [
+                "qa"
+              ],
+              "technologies": [],
+              "sourceRef": {
+                "section": "experiencia",
+                "excerptSha256": "07f10c4316a011c4ddb8055d66cc368479151843125b98fd0be6a88d35559f06"
+              },
+              "approvedAt": "2026-10-22"
+            }
+          ]
+        }
+      ],
+      "technologies": [
+        "TypeScript",
+        "Fastify",
+        "React",
+        "Vite",
+        "PostgreSQL",
+        "Prisma ORM",
+        "Zod",
+        "Vitest",
+        "Playwright"
+      ],
+      "links": [
+        {
+          "id": "exp-ordemfacil-demo",
+          "label": "Demo",
+          "url": "https://ordemfacil.example.com/",
+          "confirmedByUser": false
+        }
+      ],
+      "priority": 80,
+      "sourceRef": {
+        "section": "experiencia",
+        "excerptSha256": "c01068ce525c4be6c51286d87e1178164e97f87470cfbe2b5e33145ef957c0c4"
+      }
+    },
+    {
+      "id": "exp-agendamais",
+      "kind": "experiencia",
+      "title": {
+        "pt-BR": "AgendaMais — SaaS de Agendamento e Atendimento (projeto autoral)"
+      },
+      "period": {
+        "start": "2026"
+      },
+      "bullets": [
+        {
+          "id": "exp-agendamais-b1",
+          "required": false,
+          "priority": 50,
+          "variants": [
+            {
+              "id": "exp-agendamais-b1-a",
+              "text": {
+                "pt-BR": "Desenvolvi uma plataforma multiempresa, usada em média por 35 pessoas, para gestão de agenda, serviços e profissionais, com cálculo de horários livres por fuso horário e confirmação pelo WhatsApp."
+              },
+              "areas": [],
+              "technologies": [],
+              "sourceRef": {
+                "section": "experiencia",
+                "excerptSha256": "efd7163c6a52db041f9cb8969ccedb3181588ef551f3bd5eb25397387dacd47b"
+              },
+              "approvedAt": "2026-10-22"
+            }
+          ]
+        },
+        {
+          "id": "exp-agendamais-b2",
+          "required": false,
+          "priority": 50,
+          "variants": [
+            {
+              "id": "exp-agendamais-b2-a",
+              "text": {
+                "pt-BR": "Impedi agendamentos sobrepostos mesmo sob concorrência com exclusion constraint GiST no PostgreSQL, chave de idempotência na criação e controle de versão contra edições simultâneas."
+              },
+              "areas": [],
+              "technologies": [],
+              "sourceRef": {
+                "section": "experiencia",
+                "excerptSha256": "ec83f0d6ee4f9a418e282f4dd59bb55017140eb284987b6e0bd1ddf154467fd3"
+              },
+              "approvedAt": "2026-10-22"
+            }
+          ]
+        }
+      ],
+      "technologies": [
+        "TypeScript",
+        "React",
+        "Fastify",
+        "PostgreSQL",
+        "Docker"
+      ],
+      "links": [],
+      "priority": 70,
+      "sourceRef": {
+        "section": "experiencia",
+        "excerptSha256": "6419eb0a024a470135530587e4f7a8715d86e59050956e64ba6bd9a6ea7cffc9"
+      }
+    }
+  ],
+  "projects": [
+    {
+      "id": "proj-notasfacil",
+      "kind": "projeto",
+      "title": {
+        "pt-BR": "NotasFácil — Plataforma de Gestão de Compras, Documentos e Garantias"
+      },
+      "period": {
+        "start": "2026"
+      },
+      "bullets": [
+        {
+          "id": "proj-notasfacil-b1",
+          "required": false,
+          "priority": 50,
+          "variants": [
+            {
+              "id": "proj-notasfacil-b1-a",
+              "text": {
+                "pt-BR": "Aplicação Full Stack para centralizar compras, notas fiscais e garantias, com dashboard de vencimentos, autenticação JWT e Google OAuth 2.0 e upload seguro de arquivos."
+              },
+              "areas": [],
+              "technologies": [],
+              "sourceRef": {
+                "section": "projetos",
+                "excerptSha256": "7f02182a982b9dec9ceecde6c9d5a8d5ab33792e3df6ff95cb9dae2fda54d6fd"
+              },
+              "approvedAt": "2026-10-22"
+            }
+          ]
+        },
+        {
+          "id": "proj-notasfacil-b2",
+          "required": false,
+          "priority": 50,
+          "variants": [
+            {
+              "id": "proj-notasfacil-b2-a",
+              "text": {
+                "pt-BR": "Mais de 500 testes automatizados (250 no frontend e 250 no backend), cobrindo componentes de interface e rotas de API."
+              },
+              "areas": [
+                "qa"
+              ],
+              "technologies": [],
+              "sourceRef": {
+                "section": "projetos",
+                "excerptSha256": "f75e470f4c1b4ccfebb0d0abcc2cfd3ea781e07b9eb8a26b3aa493aa8d2585eb"
+              },
+              "approvedAt": "2026-10-22"
+            }
+          ]
+        }
+      ],
+      "technologies": [
+        "TypeScript",
+        "React",
+        "Node.js",
+        "Express",
+        "PostgreSQL"
+      ],
+      "links": [
+        {
+          "id": "proj-notasfacil-gh",
+          "label": "GitHub",
+          "url": "https://www.example.com/maria-exemplo/notasfacil",
+          "confirmedByUser": false
+        }
+      ],
+      "priority": 60,
+      "sourceRef": {
+        "section": "projetos",
+        "excerptSha256": "07bb641adf6f35ae35d18a24f5f1411d33fc32157641e8dba73122890a134942"
+      }
+    },
+    {
+      "id": "proj-synclab",
+      "kind": "projeto",
+      "title": {
+        "pt-BR": "SyncLab Exemplo — Plataforma Web Offline-First com Sincronização de Dados"
+      },
+      "period": {
+        "start": "2025"
+      },
+      "bullets": [
+        {
+          "id": "proj-synclab-b1",
+          "required": false,
+          "priority": 50,
+          "variants": [
+            {
+              "id": "proj-synclab-b1-a",
+              "text": {
+                "pt-BR": "Apliquei SQLite/WASM para funcionamento offline, com sincronização via CRDTs e Vector Clocks e Operation Log append-only."
+              },
+              "areas": [],
+              "technologies": [],
+              "sourceRef": {
+                "section": "projetos",
+                "excerptSha256": "10bf6ce792935fa5701bbeb3044056eb042960165f7ca0861191f00708bb444b"
+              },
+              "approvedAt": "2026-10-22"
+            }
+          ]
+        }
+      ],
+      "technologies": [
+        "TypeScript",
+        "Vite",
+        "SQLite/WASM",
+        "PostgreSQL"
+      ],
+      "links": [],
+      "priority": 40,
+      "sourceRef": {
+        "section": "projetos",
+        "excerptSha256": "6fa73af831c3d2654518744ba231b44e1e015e7fa8e21a6269fc464796e252df"
+      }
+    }
+  ],
+  "education": [
+    {
+      "id": "edu-ads",
+      "course": {
+        "pt-BR": "Análise e Desenvolvimento de Sistemas"
+      },
+      "institution": "Faculdade Exemplo",
+      "degreeType": "tecnologo",
+      "status": "cursando",
+      "statusLabel": {
+        "pt-BR": "Cursando, previsão de conclusão em 2028"
+      },
+      "sourceRef": {
+        "section": "educacao",
+        "excerptSha256": "788eb2efc52660fe41472319f0d2c623be6540c956921b3632fcc934bf1be10d"
+      }
+    },
+    {
+      "id": "edu-tec",
+      "course": {
+        "pt-BR": "Ensino Médio Técnico em Desenvolvimento de Sistemas"
+      },
+      "institution": "Escola Técnica Exemplo",
+      "degreeType": "tecnico",
+      "status": "concluido",
+      "statusLabel": {
+        "pt-BR": "Concluído em 2025"
+      },
+      "sourceRef": {
+        "section": "educacao",
+        "excerptSha256": "6a98d80b84ca49f2e0be4da691556cc2b3559dc95273a2ae14032de6ab75d839"
+      }
+    }
+  ],
+  "skills": [
+    {
+      "id": "sk-linguagens",
+      "category": {
+        "pt-BR": "Linguagens"
+      },
+      "items": [
+        "JavaScript (ES6+)",
+        "TypeScript",
+        "SQL"
+      ],
+      "priority": 90,
+      "areas": [],
+      "sourceRef": {
+        "section": "skills",
+        "excerptSha256": "acac86c0e609ca906f632b0e2dacccb2b77d22b0621f20ebece1a4835b93f6f0"
+      }
+    },
+    {
+      "id": "sk-front",
+      "category": {
+        "pt-BR": "Front-end"
+      },
+      "items": [
+        "React",
+        "Vite",
+        "Tailwind CSS",
+        "HTML5",
+        "CSS3",
+        "Design Responsivo"
+      ],
+      "priority": 80,
+      "areas": [
+        "desenvolvimento"
+      ],
+      "sourceRef": {
+        "section": "skills",
+        "excerptSha256": "252f10c83610ebca1a059c0bae8255eba2f95be4d1d7bcfa89d7248a82d9f111"
+      }
+    },
+    {
+      "id": "sk-back",
+      "category": {
+        "pt-BR": "Back-end"
+      },
+      "items": [
+        "Node.js",
+        "Express",
+        "Fastify",
+        "API REST",
+        "JWT",
+        "OAuth 2.0",
+        "Webhooks",
+        "Zod"
+      ],
+      "priority": 80,
+      "areas": [
+        "desenvolvimento"
+      ],
+      "sourceRef": {
+        "section": "skills",
+        "excerptSha256": "3e23e8160039594a33894f6564e1b1348bbd7a0088d42c4acb73eeaed59c009d"
+      }
+    },
+    {
+      "id": "sk-bd",
+      "category": {
+        "pt-BR": "Banco de Dados"
+      },
+      "items": [
+        "PostgreSQL",
+        "MySQL",
+        "SQLite/WASM",
+        "Prisma ORM"
+      ],
+      "priority": 70,
+      "areas": [
+        "banco-de-dados"
+      ],
+      "sourceRef": {
+        "section": "skills",
+        "excerptSha256": "18ac3e7343f016890c510e93f935261169d9e3f565436429830faf0934f4f8e4"
+      }
+    },
+    {
+      "id": "sk-testes",
+      "category": {
+        "pt-BR": "Testes"
+      },
+      "items": [
+        "Vitest",
+        "Testing Library",
+        "Playwright (E2E)",
+        "testes de integração"
+      ],
+      "priority": 70,
+      "areas": [
+        "qa"
+      ],
+      "sourceRef": {
+        "section": "skills",
+        "excerptSha256": "e3b98a4da31a127d4bde6e43033f66ba274cab0eb7eb1c70ec41402bf6273dd8"
+      }
+    },
+    {
+      "id": "sk-ferr",
+      "category": {
+        "pt-BR": "Ferramentas"
+      },
+      "items": [
+        "Git",
+        "GitHub",
+        "GitHub Actions",
+        "Docker",
+        "CI/CD",
+        "Metodologias Ágeis"
+      ],
+      "priority": 60,
+      "areas": [],
+      "sourceRef": {
+        "section": "skills",
+        "excerptSha256": "2d711642b726b04401627ca9fbac32f5c8530fb1903cc4db02258717921a4881"
+      }
+    }
+  ],
+  "languages": [
+    {
+      "id": "lang",
+      "label": {
+        "pt-BR": "Português: Nativo | Inglês: Intermediário (leitura técnica e documentação)"
+      },
+      "sourceRef": {
+        "section": "idiomas",
+        "excerptSha256": "de7d1b721a1e0632b7cf04edf5032c8ecffa9f9a08492152b926f1a5a7e765d7"
+      }
+    }
+  ],
+  "certifications": [
+    {
+      "id": "cert-api",
+      "title": {
+        "pt-BR": "Fundamentos de APIs REST — aplicações e boas práticas de integração"
+      },
+      "issuer": "Instituto Exemplo",
+      "year": 2026,
+      "sourceRef": {
+        "section": "certificacoes",
+        "excerptSha256": "2e7d2c03a9507ae265ecf5b5356885a53393a2029d241394997265a1a25aefc6"
+      }
+    }
+  ],
+  "layout": {
+    "sectionOrder": [
+      "summary",
+      "experience",
+      "projects",
+      "skills",
+      "education",
+      "languages",
+      "certifications"
+    ],
+    "maxPages": 1
+  }
+}

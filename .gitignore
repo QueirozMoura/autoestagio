@@ -10,6 +10,11 @@ data/*
 config/profile.json
 config/sources.json
 
+# spikes: dependências e saídas geradas (reproduzíveis)
+spikes/*/node_modules/
+spikes/*/.venv/
+spikes/*/out/
+
 # segredos
 .env
 .env.*
