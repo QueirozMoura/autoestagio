@@ -41,6 +41,10 @@ const targetSchema = z.object({
   enabled: z.boolean().default(true),
   /** Sobrescreve a verificação de robots.txt apenas para este alvo. */
   respectRobots: z.boolean().optional(),
+  /** Guarda apenas vagas no Brasil (ou LATAM). Use `false` para empresas só de vagas locais. */
+  brazilOnly: z.boolean().default(true),
+  /** Lever: instância dos dados da empresa. Contas europeias usam `api.eu.lever.co`. */
+  instance: z.enum(['global', 'eu']).default('global'),
 });
 
 export const sourcesConfigSchema = z
@@ -52,6 +56,13 @@ export const sourcesConfigSchema = z
   .superRefine((config, ctx) => {
     const seen = new Set<string>();
     config.targets.forEach((target, index) => {
+      if (target.instance === 'eu' && target.kind !== 'lever') {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['targets', index, 'instance'],
+          message: '"eu" só se aplica ao Lever',
+        });
+      }
       const key = `${target.kind}:${target.slug.toLowerCase()}`;
       if (seen.has(key)) {
         ctx.addIssue({

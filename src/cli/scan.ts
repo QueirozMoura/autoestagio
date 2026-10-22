@@ -30,6 +30,15 @@ export function formatScanReport(report: ScanReport, index: number, total: numbe
 
   for (const source of report.sources) {
     lines.push(row(source.source, counts(source)));
+    if (source.stats !== null) {
+      const { listed, internships, inRegion, invalid, detailSkipped, truncated } = source.stats;
+      lines.push(
+        `    listadas na fonte: ${listed} | de estágio: ${internships} | na região: ${inRegion}` +
+          (invalid > 0 ? ` | itens inválidos: ${invalid}` : '') +
+          (detailSkipped > 0 ? ` | sem detalhe: ${detailSkipped}` : '') +
+          (truncated ? ' | PARCIAL (limite atingido)' : ''),
+      );
+    }
     if (source.error !== null) lines.push(`    ! ${source.error}`);
     for (const failure of source.failures) lines.push(`    ! ${failure}`);
   }

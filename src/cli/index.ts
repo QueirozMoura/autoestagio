@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 import { Command } from 'commander';
 import { ConfigError, loadConfig } from '../config/index.js';
-import { runSimulation } from '../discovery/index.js';
-import { openDatabase, runMigrations } from '../db/index.js';
+import { getMigrationStatus, openDatabase, runMigrations } from '../db/index.js';
+import { runRealScan, runSimulation, type ScanReport } from '../discovery/index.js';
+import { loadSourcesConfig } from '../sources/index.js';
 import { formatScanReport } from './scan.js';
 import { collectStatus, formatStatus } from './status.js';
 
@@ -42,27 +43,56 @@ program
 
 program
   .command('scan')
-  .description('Coleta vagas. Nesta etapa só existe o modo simulado (fontes fictícias, sem rede)')
+  .description('Coleta vagas de estágio nas fontes configuradas, ou em modo simulado (--simulate)')
   .option('--simulate', 'usa fontes fictícias e dados de teste; nenhuma requisição é feita')
+  .option(
+    '--source <kind:slug...>',
+    'limita a coleta real a estas fontes (ex.: greenhouse:agilize)',
+  )
   .option(
     '--db-file <caminho>',
     'guarda o resultado simulado neste arquivo (padrão: só em memória)',
   )
-  .option('--repeat <n>', 'repete a execução n vezes, para conferir a idempotência', '1')
+  .option('--repeat <n>', 'repete a execução simulada n vezes, para conferir a idempotência', '1')
   .option('--json', 'saída em JSON')
   .action(
-    async (options: { simulate?: boolean; dbFile?: string; repeat: string; json?: boolean }) => {
-      if (options.simulate !== true) {
-        throw new Error(
-          'Fontes reais ainda não foram implementadas. Use "scan --simulate" para o modo simulado.',
-        );
-      }
+    async (options: {
+      simulate?: boolean;
+      source?: string[];
+      dbFile?: string;
+      repeat: string;
+      json?: boolean;
+    }) => {
       const config = loadConfig();
-      const reports = await runSimulation({
-        dbFile: options.dbFile,
-        protectedDbPath: config.databasePath,
-        repeat: Number(options.repeat),
-      });
+      let reports: ScanReport[];
+      let footer: string;
+
+      if (options.simulate === true) {
+        reports = await runSimulation({
+          dbFile: options.dbFile,
+          protectedDbPath: config.databasePath,
+          repeat: Number(options.repeat),
+        });
+        footer =
+          options.dbFile === undefined
+            ? 'Dados simulados mantidos apenas em memória; nada foi gravado em disco.'
+            : `Resultado gravado em ${options.dbFile}.`;
+      } else {
+        const db = openDatabase(config.databasePath);
+        try {
+          const { pending } = getMigrationStatus(db);
+          if (pending.length > 0) {
+            throw new Error(
+              `Há migrações pendentes (${pending.join(', ')}). Rode "migrate" antes do scan.`,
+            );
+          }
+          reports = [await runRealScan({ db, config: loadSourcesConfig(), only: options.source })];
+        } finally {
+          db.close();
+        }
+        footer = `Vagas gravadas em ${config.databasePath}. Somente leitura nas plataformas; nada foi enviado.`;
+      }
+
       if (options.json === true) {
         console.log(JSON.stringify(reports, null, 2));
         return;
@@ -70,11 +100,10 @@ program
       console.log(
         reports.map((report, i) => formatScanReport(report, i, reports.length)).join('\n\n'),
       );
-      console.log(
-        options.dbFile === undefined
-          ? '\nDados simulados mantidos apenas em memória; nada foi gravado em disco.'
-          : `\nResultado gravado em ${options.dbFile}.`,
-      );
+      console.log(`\n${footer}`);
+      if (reports.every((report) => report.sources.every((source) => source.error !== null))) {
+        process.exitCode = 1;
+      }
     },
   );
 

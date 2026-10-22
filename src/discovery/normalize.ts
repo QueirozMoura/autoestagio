@@ -134,7 +134,7 @@ export function normalizeJob(raw: RawJob): NormalizedJob {
   const titleKey = titleKeyOf(title);
   const companyKey = company === null ? null : companyKeyOf(company);
   const locationKey = location === null ? null : locationKeyOf(location);
-  const workMode = detectWorkMode({ title, location, description });
+  const workMode = raw.workMode ?? detectWorkMode({ title, location, description });
   const { text: stipendText, stipend } = extractStipend(raw.compensationText, description);
   const postedAt = toIso(raw.postedAt);
 

@@ -22,6 +22,8 @@ export const rawJobSchema = z.object({
   /** Texto livre sobre bolsa/remuneração, exatamente como publicado. */
   compensationText: z.string().optional(),
   postedAt: z.iso.datetime({ offset: true }).optional(),
+  /** Modalidade, quando a fonte a informa de forma estruturada. */
+  workMode: z.enum(['remoto', 'hibrido', 'presencial']).optional(),
 });
 
 export type RawJob = z.infer<typeof rawJobSchema>;
@@ -39,6 +41,22 @@ export interface SourceContext {
   signal?: AbortSignal | undefined;
 }
 
+/** Contagens de uma execução, para o relatório. Cada adaptador preenche o que souber. */
+export interface SourceRunStats {
+  /** Vagas listadas pela fonte, de qualquer tipo. */
+  listed: number;
+  /** Vagas cujo título indica estágio. */
+  internships: number;
+  /** Estágios que também passaram no filtro de região. */
+  inRegion: number;
+  /** Itens da resposta que não tinham o formato esperado e foram descartados. */
+  invalid: number;
+  /** Vagas cuja página de detalhe não existia mais (404/410) e foram puladas. */
+  detailSkipped: number;
+  /** Parou antes do fim por causa dos limites de vagas ou de páginas. */
+  truncated: boolean;
+}
+
 export interface JobSource {
   /** Tipo do adaptador, por exemplo "greenhouse". */
   readonly kind: string;
@@ -48,6 +66,8 @@ export interface JobSource {
   readonly name: string;
   /** Lista as vagas. Deve respeitar `ctx.limits` e `ctx.signal`. */
   fetchJobs(ctx: SourceContext): AsyncIterable<RawJob>;
+  /** Estatísticas da última execução de `fetchJobs`, se o adaptador as coleta. */
+  lastRunStats?(): SourceRunStats | undefined;
 }
 
 export type SourceErrorCategory =

@@ -6,6 +6,7 @@ import {
   type JobSource,
   type SourceContext,
   type SourceErrorCategory,
+  type SourceRunStats,
 } from '../sources/index.js';
 import { ingestJob } from './ingest.js';
 import { NormalizationError, normalizeJob } from './normalize.js';
@@ -16,6 +17,8 @@ export interface SourceScanReport extends RunCounters {
   /** Falha que interrompeu esta fonte; as demais continuam. */
   error: string | null;
   errorCategory: SourceErrorCategory | null;
+  /** Estatísticas do adaptador (vagas listadas, estágios etc.), quando ele as informa. */
+  stats: SourceRunStats | null;
   /** Mensagens das vagas que falharam na persistência (limitadas). */
   failures: string[];
 }
@@ -77,6 +80,7 @@ export async function runScan(options: ScanOptions): Promise<ScanReport> {
       ...emptyCounters(),
       error: null,
       errorCategory: null,
+      stats: null,
       failures: [],
     };
     let consecutiveFailures = 0;
@@ -131,6 +135,7 @@ export async function runScan(options: ScanOptions): Promise<ScanReport> {
       report.errorCategory = sourceError.category;
     }
 
+    report.stats = source.lastRunStats?.() ?? null;
     const runError = report.error ?? report.failures[0] ?? null;
     store.finishRun(runId, clock().toISOString(), report, runError);
     reports.push(report);

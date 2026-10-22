@@ -5,8 +5,8 @@ Todos os dados ficam na sua máquina (SQLite).
 
 > **Objetivo e critérios de aceitação:** veja [docs/ACCEPTANCE.md](docs/ACCEPTANCE.md).
 >
-> **Status:** Fase 2 em andamento (infraestrutura HTTP, normalização, deduplicação e persistência).
-> Ainda não há coleta real de vagas, integração com Gmail, Playwright nem candidaturas.
+> **Status:** Fase 2 em andamento. Já há coleta real e somente leitura em Greenhouse e Lever
+> (veja [docs/SOURCES.md](docs/SOURCES.md)). Ainda não há Gmail, Playwright nem candidaturas.
 > Veja o [roteiro](#roteiro).
 
 ## Requisitos
@@ -30,16 +30,32 @@ instalação falhar, instale as ferramentas de compilação (`build-essential` e
 
 ## Comandos
 
-| Comando                          | Descrição                                                    |
-| -------------------------------- | ------------------------------------------------------------ |
-| `npm run dev -- status`          | Mostra modo, perfil e estado do banco (`--json` disponível)  |
-| `npm run dev -- migrate`         | Cria o banco e aplica migrações pendentes                    |
-| `npm run dev -- scan --simulate` | Coleta simulada com fontes fictícias, sem rede (veja abaixo) |
-| `npm run build` / `start`        | Compila para `dist/` e executa a versão compilada            |
-| `npm test`                       | Testes (Vitest)                                              |
-| `npm run typecheck`              | Verificação de tipos (TypeScript strict)                     |
-| `npm run lint`                   | ESLint                                                       |
-| `npm run format`                 | Prettier                                                     |
+| Comando                          | Descrição                                                                                 |
+| -------------------------------- | ----------------------------------------------------------------------------------------- |
+| `npm run dev -- status`          | Mostra modo, perfil e estado do banco (`--json` disponível)                               |
+| `npm run dev -- migrate`         | Cria o banco e aplica migrações pendentes                                                 |
+| `npm run dev -- scan`            | Coleta estágios nas fontes de `config/sources.json` (Greenhouse e Lever), somente leitura |
+| `npm run dev -- scan --simulate` | Coleta simulada com fontes fictícias, sem rede (veja abaixo)                              |
+| `npm run build` / `start`        | Compila para `dist/` e executa a versão compilada                                         |
+| `npm test`                       | Testes (Vitest)                                                                           |
+| `npm run typecheck`              | Verificação de tipos (TypeScript strict)                                                  |
+| `npm run lint`                   | ESLint                                                                                    |
+| `npm run format`                 | Prettier                                                                                  |
+
+## Scan real (somente leitura)
+
+```bash
+cp config/sources.example.json config/sources.json   # depois adicione seus alvos (arquivo local, fora do Git)
+npm run dev -- migrate
+npm run dev -- scan                              # todas as fontes habilitadas
+npm run dev -- scan --source greenhouse:agilize  # só uma
+```
+
+Cada alvo é `{ "kind": "greenhouse" | "lever", "slug": "...", "name": "..." }`, em que `slug` é o
+token do quadro (a parte final de `job-boards.greenhouse.io/<slug>` ou `jobs.lever.co/<slug>`).
+O scan só faz `GET` nas APIs públicas e documentadas, respeita o `robots.txt`, limita o ritmo por host
+e **não envia nada**. Guarda apenas vagas de estágio (por padrão, só no Brasil; use `"brazilOnly": false`
+para mudar) e grava no banco real. Falhas de uma fonte não afetam as outras.
 
 ## Scan simulado
 

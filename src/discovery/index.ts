@@ -11,3 +11,4 @@ export { JobStore, type RunCounters } from './store.js';
 export { runScan, type ScanOptions, type ScanReport, type SourceScanReport } from './scan.js';
 export { createSimulatedSources } from './simulated.js';
 export { runSimulation, SimulationError, type SimulationOptions } from './simulate.js';
+export { runRealScan, type RealScanOptions } from './real-scan.js';
