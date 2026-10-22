@@ -1,0 +1,43 @@
+{
+  "name": "Seu Nome Completo",
+  "city": "São Paulo, SP",
+  "education": {
+    "course": "Análise e Desenvolvimento de Sistemas",
+    "institution": "Uniasselvi",
+    "expectedGraduationYear": 2028
+  },
+  "level": "estagio",
+  "areas": [
+    "full-stack",
+    "front-end",
+    "back-end",
+    "qa",
+    "suporte-tecnico",
+    "infraestrutura",
+    "dados"
+  ],
+  "technologies": [
+    "TypeScript",
+    "JavaScript",
+    "React",
+    "Node.js",
+    "Express",
+    "Fastify",
+    "PostgreSQL",
+    "Prisma",
+    "SQL",
+    "Git",
+    "Docker",
+    "Vitest",
+    "Playwright"
+  ],
+  "workModes": {
+    "preferred": ["remoto", "hibrido"],
+    "onsite": { "allowed": true, "maxCommuteMinutesPerWay": 70 }
+  },
+  "minStipend": {
+    "amount": 1200,
+    "currency": "BRL",
+    "whenUnknown": "pendente"
+  }
+}

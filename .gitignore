@@ -1,0 +1,23 @@
+# dependências e build
+node_modules/
+dist/
+coverage/
+*.tsbuildinfo
+
+# dados locais e pessoais (banco, currículos, screenshots)
+data/*
+!data/.gitkeep
+config/profile.json
+
+# segredos
+.env
+.env.*
+!.env.example
+credentials*.json
+token*.json
+
+# sistema / editor
+.DS_Store
+.vscode/
+.idea/
+*.log
