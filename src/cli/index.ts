@@ -1,11 +1,26 @@
 #!/usr/bin/env node
 import { Command } from 'commander';
-import { ConfigError, loadConfig, loadProfile } from '../config/index.js';
+import { ConfigError, loadConfig, loadProfile, verifyApprovedCv } from '../config/index.js';
 import { getMigrationStatus, openDatabase, runMigrations } from '../db/index.js';
 import { runRealScan, runSimulation, type ScanReport } from '../discovery/index.js';
+import {
+  STATUSES,
+  countByStatus,
+  getApplication,
+  getHistory,
+  listApplications,
+  recoverInterrupted,
+  type Status,
+} from '../applications/index.js';
 import { analyzeJobs, VERDICTS, type Verdict } from '../eligibility/index.js';
 import { loadSourcesConfig } from '../sources/index.js';
 import { formatAnalysis } from './analyze.js';
+import {
+  formatApplication,
+  formatApplicationList,
+  formatCounts,
+  formatHistory,
+} from './applications.js';
 import { formatScanReport } from './scan.js';
 import { collectStatus, formatStatus } from './status.js';
 
@@ -120,11 +135,20 @@ program
   .option('--json', 'saída em JSON')
   .action((options: { save: boolean; verdict?: string; verbose?: boolean; json?: boolean }) => {
     const config = loadConfig();
-    const profile = loadProfile(config.profilePath);
-    if (profile === undefined) {
+    const loaded = loadProfile(config.profilePath);
+    if (loaded === undefined) {
       throw new Error(
         `Perfil não encontrado em ${config.profilePath}. Veja config/profile.example.json.`,
       );
+    }
+    // A aprovação só vale se o currículo no disco for exatamente o aprovado (SHA-256).
+    let profile = loaded;
+    if (loaded.approval !== undefined) {
+      const cv = verifyApprovedCv(loaded);
+      if (!cv.ok) {
+        console.warn(`Aviso: aprovação ignorada: ${cv.reason}.`);
+        profile = { ...loaded, approval: undefined };
+      }
     }
     if (
       options.verdict !== undefined &&
@@ -156,6 +180,100 @@ program
     } finally {
       db.close();
     }
+  });
+
+const applications = program
+  .command('applications')
+  .description('Consulta o histórico de candidaturas (somente leitura, sem dados sensíveis)');
+
+function withDb<T>(fn: (db: ReturnType<typeof openDatabase>) => T): T {
+  const config = loadConfig();
+  const db = openDatabase(config.databasePath);
+  try {
+    const { pending } = getMigrationStatus(db);
+    if (pending.length > 0) {
+      throw new Error(`Há migrações pendentes (${pending.join(', ')}). Rode "migrate" antes.`);
+    }
+    return fn(db);
+  } finally {
+    db.close();
+  }
+}
+
+function parseId(value: string): number {
+  const id = Number(value);
+  if (!Number.isInteger(id) || id <= 0) throw new Error(`Identificador inválido: ${value}`);
+  return id;
+}
+
+applications
+  .command('list')
+  .description('Lista as candidaturas')
+  .option('--status <estado>', `filtra por estado (${STATUSES.join(', ')})`)
+  .option('--json', 'saída em JSON')
+  .action((options: { status?: string; json?: boolean }) => {
+    if (options.status !== undefined && !(STATUSES as readonly string[]).includes(options.status)) {
+      throw new Error(`Estado inválido: ${options.status}. Use ${STATUSES.join(', ')}.`);
+    }
+    const items = withDb((db) =>
+      listApplications(
+        db,
+        options.status === undefined ? {} : { status: options.status as Status },
+      ),
+    );
+    console.log(
+      options.json === true ? JSON.stringify(items, null, 2) : formatApplicationList(items),
+    );
+  });
+
+applications
+  .command('show <id>')
+  .description('Mostra uma candidatura')
+  .option('--json', 'saída em JSON')
+  .action((id: string, options: { json?: boolean }) => {
+    const application = withDb((db) => getApplication(db, parseId(id)));
+    if (application === undefined) throw new Error(`Candidatura ${id} não encontrada.`);
+    console.log(
+      options.json === true ? JSON.stringify(application, null, 2) : formatApplication(application),
+    );
+  });
+
+applications
+  .command('history <id>')
+  .description('Mostra o histórico de transições (data, canal e motivo)')
+  .option('--json', 'saída em JSON')
+  .action((id: string, options: { json?: boolean }) => {
+    const events = withDb((db) => getHistory(db, parseId(id)));
+    console.log(options.json === true ? JSON.stringify(events, null, 2) : formatHistory(events));
+  });
+
+applications
+  .command('stats')
+  .description('Conta as candidaturas por estado')
+  .option('--json', 'saída em JSON')
+  .action((options: { json?: boolean }) => {
+    const counts = withDb((db) => countByStatus(db));
+    console.log(options.json === true ? JSON.stringify(counts, null, 2) : formatCounts(counts));
+  });
+
+applications
+  .command('recover')
+  .description('Move para intervenção humana os envios interrompidos (nunca reenvia)')
+  .option(
+    '--older-than-min <min>',
+    'considera interrompidos os envios parados há mais de n minutos',
+    '15',
+  )
+  .action((options: { olderThanMin: string }) => {
+    const minutes = Number(options.olderThanMin);
+    if (!Number.isFinite(minutes) || minutes < 0)
+      throw new Error('Valor inválido para --older-than-min.');
+    const ids = withDb((db) => recoverInterrupted(db, { olderThanMs: minutes * 60_000 }));
+    console.log(
+      ids.length === 0
+        ? 'Nenhum envio interrompido.'
+        : `Movidas para intervenção humana: ${ids.map((id) => `#${id}`).join(', ')}.`,
+    );
   });
 
 try {

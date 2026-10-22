@@ -23,7 +23,11 @@ export const baseProfile: Record<string, unknown> = {
     onsite: { allowed: true, maxCommuteMinutesPerWay: 70 },
   },
   minStipend: { amount: 1200, currency: 'BRL', whenUnknown: 'pendente' },
-  approval: { cvFile: 'curriculo-ficticio.pdf', approvedAt: '2026-10-22' },
+  approval: {
+    cvFile: 'curriculo-ficticio.pdf',
+    cvSha256: 'a'.repeat(64),
+    approvedAt: '2026-10-22',
+  },
 };
 
 export function profile(overrides: Record<string, unknown> = {}): Profile {

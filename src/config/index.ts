@@ -4,6 +4,7 @@ import { parseEnv, type AppConfig } from './env.js';
 import { PROJECT_ROOT, resolveFromRoot } from '../utils/paths.js';
 
 export { ConfigError, APPLY_MODES, type ApplyMode, type AppConfig } from './env.js';
+export { sha256File, verifyApprovedCv, type CvCheck, type CvReference } from './cv.js';
 export {
   LANGUAGE_LEVELS,
   loadProfile,

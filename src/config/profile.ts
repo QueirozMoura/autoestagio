@@ -70,7 +70,14 @@ export const profileSchema = z.object({
     )
     .optional(),
   /** Presente somente depois que o usuário aprova o perfil extraído do currículo. */
-  approval: z.object({ cvFile: z.string().min(1), approvedAt: z.iso.date() }).optional(),
+  approval: z
+    .object({
+      cvFile: z.string().min(1),
+      /** SHA-256 (hex) do PDF aprovado: identifica a versão exata do currículo. */
+      cvSha256: z.string().regex(/^[0-9a-f]{64}$/, 'use 64 caracteres hexadecimais minúsculos'),
+      approvedAt: z.iso.date(),
+    })
+    .optional(),
   level: z.enum(['estagio', 'junior']),
   areas: z.array(z.string().min(1)).min(1),
   technologies: z.array(z.string().min(1)).min(1),

@@ -78,7 +78,13 @@ describe('migrações', () => {
     const db = openDatabase(IN_MEMORY);
     runMigrations(db);
     expect(() =>
-      db.prepare("INSERT INTO applications (job_id, mode) VALUES (999, 'dry-run')").run(),
+      db
+        .prepare(
+          `INSERT INTO applications (job_id, mode, cv_sha256, cv_label, eligibility_verdict,
+                                     profile_hash, created_at, updated_at)
+           VALUES (999, 'dry-run', ?, 'cv.pdf', 'apto', 'h', 'x', 'x')`,
+        )
+        .run('a'.repeat(64)),
     ).toThrow(/FOREIGN KEY/);
     db.close();
   });

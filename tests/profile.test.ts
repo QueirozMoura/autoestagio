@@ -43,7 +43,7 @@ describe('parseProfile', () => {
       languages: [{ language: 'Inglês', level: 'intermediario' }],
       availability: { hoursPerWeek: { min: 20, max: 30 }, startFrom: '2026-12-01' },
       commute: [{ keywords: ['pinheiros'], minutesPerWay: 45, source: 'teste' }],
-      approval: { cvFile: 'cv.pdf', approvedAt: '2026-10-22' },
+      approval: { cvFile: 'cv.pdf', cvSha256: 'b'.repeat(64), approvedAt: '2026-10-22' },
     });
     expect(ok.languages?.[0]?.level).toBe('intermediario');
     expect(ok.languages?.[0]?.scope).toBe('geral'); // padrão: sem restrição de uso
@@ -54,7 +54,9 @@ describe('parseProfile', () => {
       { availability: { hoursPerWeek: { min: 20, max: 30 }, startFrom: 'dezembro' } },
       { languages: [{ language: 'Inglês', level: 'basico', scope: 'conversacao' }] },
       { commute: [{ keywords: [], minutesPerWay: 45, source: 'teste' }] },
-      { approval: { cvFile: 'cv.pdf', approvedAt: 'ontem' } },
+      { approval: { cvFile: 'cv.pdf', cvSha256: 'b'.repeat(64), approvedAt: 'ontem' } },
+      { approval: { cvFile: 'cv.pdf', approvedAt: '2026-10-22' } }, // sem SHA-256
+      { approval: { cvFile: 'cv.pdf', cvSha256: 'xyz', approvedAt: '2026-10-22' } },
     ]) {
       expect(() => parseProfile({ ...base, ...invalid })).toThrow(ConfigError);
     }
