@@ -25,5 +25,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     ...config,
     databasePath: resolveFromRoot(config.databasePath),
     profilePath: resolveFromRoot(config.profilePath),
+    oauthClientPath: resolveFromRoot(config.oauthClientPath),
+    tokenPath: resolveFromRoot(config.tokenPath),
+    emailConfigPath: resolveFromRoot(config.emailConfigPath),
   };
 }

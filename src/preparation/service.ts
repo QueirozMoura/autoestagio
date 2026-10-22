@@ -414,6 +414,22 @@ export function prepareApplication(db: Db, options: PrepareOptions): PrepareResu
   return run.immediate();
 }
 
+/** Conteúdo exato do rascunho, para o canal de envio (só leitura). */
+export function getDraftRecord(
+  db: Db,
+  applicationId: number,
+): { subject: string; body: string; contentHash: string; reviewedHash: string | null } | undefined {
+  const draft = loadDraft(db, applicationId);
+  return draft === undefined
+    ? undefined
+    : {
+        subject: draft.subject,
+        body: draft.body,
+        contentHash: draft.content_hash,
+        reviewedHash: draft.reviewed_hash,
+      };
+}
+
 // ------------------------------------------------------------------ revisar
 
 export interface RequirementView {

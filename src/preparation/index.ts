@@ -18,6 +18,7 @@ export {
   answerRequirement,
   assertDraftSafe,
   computeReadiness,
+  getDraftRecord,
   getPreparation,
   listCandidates,
   markReviewed,

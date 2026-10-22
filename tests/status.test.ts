@@ -21,6 +21,10 @@ function makeConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     applyMode: 'dry-run',
     allowAutoApply: false,
     maxApplicationsPerDay: 10,
+    emailSendEnabled: false,
+    oauthClientPath: join(dir, 'client.json'),
+    tokenPath: join(dir, 'token.json'),
+    emailConfigPath: join(dir, 'email.json'),
     ...overrides,
   };
 }

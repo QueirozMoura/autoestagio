@@ -15,6 +15,11 @@ const envSchema = z
     APPLY_MODE: z.enum(APPLY_MODES).default('dry-run'),
     ALLOW_AUTO_APPLY: booleanString,
     MAX_APPLICATIONS_PER_DAY: z.coerce.number().int().min(0).max(100).default(10),
+    /** Trava mestra do envio de e-mails (inclusive de teste). Desligada por padrão. */
+    EMAIL_SEND_ENABLED: booleanString,
+    GOOGLE_OAUTH_CLIENT_PATH: z.string().min(1).default('config/google-oauth-client.json'),
+    GMAIL_TOKEN_PATH: z.string().min(1).default('data/gmail-token.json'),
+    EMAIL_CONFIG_PATH: z.string().min(1).default('config/email.json'),
   })
   .superRefine((env, ctx) => {
     if (env.APPLY_MODE !== 'auto') return;
@@ -39,6 +44,10 @@ export interface AppConfig {
   applyMode: ApplyMode;
   allowAutoApply: boolean;
   maxApplicationsPerDay: number;
+  emailSendEnabled: boolean;
+  oauthClientPath: string;
+  tokenPath: string;
+  emailConfigPath: string;
 }
 
 export function parseEnv(source: Record<string, string | undefined>): AppConfig {
@@ -53,6 +62,10 @@ export function parseEnv(source: Record<string, string | undefined>): AppConfig 
     applyMode: env.APPLY_MODE,
     allowAutoApply: env.ALLOW_AUTO_APPLY,
     maxApplicationsPerDay: env.MAX_APPLICATIONS_PER_DAY,
+    emailSendEnabled: env.EMAIL_SEND_ENABLED,
+    oauthClientPath: env.GOOGLE_OAUTH_CLIENT_PATH,
+    tokenPath: env.GMAIL_TOKEN_PATH,
+    emailConfigPath: env.EMAIL_CONFIG_PATH,
   };
 }
 

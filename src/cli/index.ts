@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { dirname, join } from 'node:path';
 import { Command } from 'commander';
 import {
   ConfigError,
@@ -8,7 +9,13 @@ import {
   type CvReference,
   type Profile,
 } from '../config/index.js';
-import { getMigrationStatus, openDatabase, runMigrations } from '../db/index.js';
+import {
+  backupDatabase,
+  backupPath,
+  getMigrationStatus,
+  openDatabase,
+  runMigrations,
+} from '../db/index.js';
 import { runRealScan, runSimulation, type ScanReport } from '../discovery/index.js';
 import {
   CHANNELS,
@@ -32,6 +39,7 @@ import {
 import { analyzeJobs, profileHash, VERDICTS, type Verdict } from '../eligibility/index.js';
 import { loadSourcesConfig } from '../sources/index.js';
 import { formatAnalysis } from './analyze.js';
+import { registerEmailCommands } from './email-commands.js';
 import { formatCandidates, formatPrepareResult, formatPreview } from './preparation.js';
 import {
   formatApplication,
@@ -60,16 +68,48 @@ program
 
 program
   .command('migrate')
-  .description('Cria o banco de dados (se necessário) e aplica as migrações pendentes')
-  .action(() => {
+  .description(
+    'Cria o banco de dados (se necessário) e aplica as migrações pendentes (com backup verificado)',
+  )
+  .option('--no-backup', 'não faz backup antes de migrar (não recomendado)')
+  .action(async (options: { backup: boolean }) => {
     const config = loadConfig();
     const db = openDatabase(config.databasePath);
     try {
+      const status = getMigrationStatus(db);
+      // Banco já em uso + migração pendente: backup verificado antes de qualquer alteração.
+      if (options.backup && status.applied.length > 0 && status.pending.length > 0) {
+        const target = backupPath(
+          join(dirname(config.databasePath), 'backups'),
+          `pre-${status.pending[0]?.slice(0, 4) ?? 'migracao'}`,
+        );
+        const result = await backupDatabase(db, target);
+        console.log(
+          `Backup verificado (${result.tables} tabelas, ${result.rows} linhas): ${result.path}`,
+        );
+      }
       const applied = runMigrations(db);
       console.log(
         applied.length > 0
           ? `Migrações aplicadas:\n${applied.map((name) => `  - ${name}`).join('\n')}`
           : 'Banco de dados já está atualizado.',
+      );
+    } finally {
+      db.close();
+    }
+  });
+
+program
+  .command('backup')
+  .description('Faz um backup verificado do banco de dados (integridade e contagem de linhas)')
+  .action(async () => {
+    const config = loadConfig();
+    const db = openDatabase(config.databasePath);
+    try {
+      const target = backupPath(join(dirname(config.databasePath), 'backups'), 'manual');
+      const result = await backupDatabase(db, target);
+      console.log(
+        `Backup verificado (${result.tables} tabelas, ${result.rows} linhas): ${result.path}`,
       );
     } finally {
       db.close();
@@ -417,6 +457,21 @@ applications
       `Rascunho da candidatura #${id} marcado como revisado. Ainda NÃO está aprovado para envio.`,
     );
   });
+
+async function withDbAsync<T>(fn: (db: ReturnType<typeof openDatabase>) => Promise<T>): Promise<T> {
+  const db = openDatabase(loadConfig().databasePath);
+  try {
+    const { pending } = getMigrationStatus(db);
+    if (pending.length > 0) {
+      throw new Error(`Há migrações pendentes (${pending.join(', ')}). Rode "migrate" antes.`);
+    }
+    return await fn(db);
+  } finally {
+    db.close();
+  }
+}
+
+registerEmailCommands(program, { withDb, withDbAsync, parseId });
 
 try {
   await program.parseAsync();

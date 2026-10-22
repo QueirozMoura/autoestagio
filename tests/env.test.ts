@@ -30,3 +30,25 @@ describe('parseEnv', () => {
     expect(() => parseEnv({ MAX_APPLICATIONS_PER_DAY: '-1' })).toThrow(ConfigError);
   });
 });
+
+describe('parseEnv — canal de e-mail', () => {
+  it('o envio de e-mails vem DESLIGADO por padrão e os caminhos têm padrão seguro', () => {
+    const config = parseEnv({});
+    expect(config.emailSendEnabled).toBe(false);
+    expect(config.tokenPath).toBe('data/gmail-token.json');
+    expect(config.oauthClientPath).toBe('config/google-oauth-client.json');
+    expect(config.emailConfigPath).toBe('config/email.json');
+  });
+
+  it('só liga com "true" explícito; outros valores são recusados', () => {
+    expect(parseEnv({ EMAIL_SEND_ENABLED: 'true' }).emailSendEnabled).toBe(true);
+    expect(() => parseEnv({ EMAIL_SEND_ENABLED: 'sim' })).toThrow(ConfigError);
+    expect(() => parseEnv({ EMAIL_SEND_ENABLED: '1' })).toThrow(ConfigError);
+  });
+
+  it('o modo auto continua indisponível mesmo com o e-mail ligado', () => {
+    expect(() =>
+      parseEnv({ APPLY_MODE: 'auto', ALLOW_AUTO_APPLY: 'true', EMAIL_SEND_ENABLED: 'true' }),
+    ).toThrow(/ainda não foi implementado/);
+  });
+});

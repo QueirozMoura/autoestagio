@@ -16,6 +16,10 @@ config/sources.json
 !.env.example
 credentials*.json
 token*.json
+client_secret*.json
+config/google-oauth-client.json
+config/email.json
+data/gmail-token.json
 
 # sistema / editor
 .DS_Store

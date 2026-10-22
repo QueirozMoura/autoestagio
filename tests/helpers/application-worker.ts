@@ -9,9 +9,12 @@ import {
   transitionApplication,
 } from '../../src/applications/index.js';
 import { openDatabase } from '../../src/db/index.js';
+import { appendFileSync } from 'node:fs';
+import { sendEmail, type EmailContext } from '../../src/email/index.js';
 import { prepareApplication } from '../../src/preparation/index.js';
 import { CV, PREP_CV, PROFILE_HASH } from './applications.js';
 import { NOW, profile } from './eligibility.js';
+import { CV_BYTES, emailProfile } from './email.js';
 
 const [dbPath, action, ...args] = process.argv.slice(2);
 if (dbPath === undefined || action === undefined) throw new Error('uso inválido');
@@ -45,6 +48,31 @@ try {
         applicationId: 'applicationId' in result ? result.applicationId : null,
       }),
     );
+  } else if (action === 'email-send' || action === 'email-send-crash') {
+    // Gmail simulado: cada chamada de envio vira uma linha no arquivo de log (o "e-mail que saiu").
+    const logFile = args[2] ?? '';
+    const ctx: EmailContext = {
+      db,
+      profile: emailProfile(),
+      sendEnabled: true,
+      maxPerDay: 10,
+      readCv: () => CV_BYTES,
+      now: () => NOW,
+      transport: {
+        send: () => {
+          appendFileSync(logFile, `saiu pid=${process.pid}\n`);
+          if (action === 'email-send-crash') process.exit(137); // cai logo depois de o Gmail "aceitar"
+          return Promise.resolve({
+            kind: 'accepted',
+            messageId: `fake-${process.pid}`,
+            threadId: undefined,
+            labelIds: [],
+          });
+        },
+      },
+    };
+    const result = await sendEmail(ctx, Number(args[0]), Number(args[1]), 'real');
+    console.log(JSON.stringify({ outcome: result.outcome }));
   } else if (action === 'send' || action === 'reserve-and-crash') {
     const result = transitionApplication(db, Number(args[0]), {
       to: 'enviando',
