@@ -433,6 +433,71 @@ export function transitionApplication(
   return run.immediate();
 }
 
+// ------------------------------------------------------------------ anotações
+
+/**
+ * Registra no histórico algo que não muda o estado (rascunho gerado, revisão feita, canal
+ * definido). Mantém a trilha completa sem criar transição falsa.
+ */
+export function annotateApplication(
+  db: Db,
+  applicationId: number,
+  note: { reason: string; actor: Actor; key?: string },
+  now: Date = new Date(),
+): void {
+  const reason = requireReason(note.reason);
+  const row = loadRow(db, applicationId);
+  insertEvent(db, {
+    applicationId,
+    from: row.status,
+    to: row.status,
+    mode: row.mode,
+    channel: row.channel,
+    actor: note.actor,
+    reason,
+    key: note.key,
+    now: now.toISOString(),
+  });
+}
+
+/** Define o canal enquanto a candidatura ainda está em preparo. */
+export function setApplicationChannel(
+  db: Db,
+  applicationId: number,
+  channel: Channel,
+  options: { reason: string; actor: Actor },
+  now: Date = new Date(),
+): Application {
+  if (!CHANNELS.includes(channel)) {
+    throw new ApplicationError('entrada_invalida', `canal desconhecido: ${channel}`);
+  }
+  const run = db.transaction((): Application => {
+    const row = loadRow(db, applicationId);
+    if (row.status !== 'preparada') {
+      throw new ApplicationError('guarda', 'o canal só muda enquanto a candidatura está preparada');
+    }
+    if (row.channel === channel) return toApplication(row);
+    const at = now.toISOString();
+    db.prepare('UPDATE applications SET channel = ?, updated_at = ? WHERE id = ?').run(
+      channel,
+      at,
+      applicationId,
+    );
+    insertEvent(db, {
+      applicationId,
+      from: row.status,
+      to: row.status,
+      mode: row.mode,
+      channel,
+      actor: options.actor,
+      reason: clip(`canal ${row.channel ?? '-'} → ${channel}: ${requireReason(options.reason)}`),
+      now: at,
+    });
+    return toApplication(loadRow(db, applicationId));
+  });
+  return run.immediate();
+}
+
 // ------------------------------------------------------------------ modo
 
 export function setApplicationMode(

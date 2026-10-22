@@ -9,7 +9,9 @@ import {
   transitionApplication,
 } from '../../src/applications/index.js';
 import { openDatabase } from '../../src/db/index.js';
-import { CV, PROFILE_HASH } from './applications.js';
+import { prepareApplication } from '../../src/preparation/index.js';
+import { CV, PREP_CV, PROFILE_HASH } from './applications.js';
+import { NOW, profile } from './eligibility.js';
 
 const [dbPath, action, ...args] = process.argv.slice(2);
 if (dbPath === undefined || action === undefined) throw new Error('uso inválido');
@@ -27,6 +29,20 @@ try {
       JSON.stringify({
         created: result.created,
         reason: 'reason' in result ? result.reason : null,
+      }),
+    );
+  } else if (action === 'prepare') {
+    const result = prepareApplication(db, {
+      profile: profile(),
+      cv: PREP_CV,
+      jobId: Number(args[0]),
+      channel: 'manual',
+      now: NOW,
+    });
+    console.log(
+      JSON.stringify({
+        outcome: result.outcome,
+        applicationId: 'applicationId' in result ? result.applicationId : null,
       }),
     );
   } else if (action === 'send' || action === 'reserve-and-crash') {

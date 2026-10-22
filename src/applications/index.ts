@@ -1,5 +1,7 @@
 export {
   ApplicationError,
+  annotateApplication,
+  setApplicationChannel,
   countByStatus,
   createApplication,
   getApplication,

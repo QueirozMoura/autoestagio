@@ -1,6 +1,8 @@
 import type { Db } from '../../src/db/index.js';
 
 export const CV = { sha256: 'c'.repeat(64), label: 'Curriculo_Ficticio.pdf' };
+/** Currículo que bate com o `approval` do perfil fictício de tests/helpers/eligibility.ts. */
+export const PREP_CV = { sha256: 'a'.repeat(64), label: 'Curriculo_Ficticio.pdf' };
 export const PROFILE_HASH = 'perfilhash0001';
 export const T0 = new Date('2026-10-22T12:00:00.000Z');
 export const minutesAfter = (m: number): Date => new Date(T0.getTime() + m * 60_000);
@@ -14,6 +16,10 @@ export interface SeedJob {
   externalId?: string | null;
   verdict?: 'apto' | 'inapto' | 'revisao_humana' | null;
   profileHash?: string;
+  description?: string | null;
+  workMode?: 'remoto' | 'hibrido' | 'presencial' | null;
+  location?: string | null;
+  stipend?: number | null;
 }
 
 let counter = 0;
@@ -29,8 +35,10 @@ export function seedJob(db: Db, overrides: SeedJob = {}): number {
     db
       .prepare(
         `INSERT INTO jobs (source_id, external_id, url, canonical_url, apply_url, title, company,
-                           content_hash, identity_key)
-         VALUES (1, @externalId, @url, @url, @applyUrl, @title, @company, @hash, @identity)`,
+                           content_hash, identity_key, description, work_mode, location,
+                           stipend_amount, stipend_max, stipend_currency)
+         VALUES (1, @externalId, @url, @url, @applyUrl, @title, @company, @hash, @identity,
+                 @description, @workMode, @location, @stipend, @stipend, @currency)`,
       )
       .run({
         externalId: overrides.externalId === undefined ? `ext-${counter}` : overrides.externalId,
@@ -40,6 +48,11 @@ export function seedJob(db: Db, overrides: SeedJob = {}): number {
         company: overrides.company === undefined ? `Empresa ${counter}` : overrides.company,
         hash: `hash-${counter}`,
         identity: overrides.identityKey ?? null,
+        description: overrides.description ?? null,
+        workMode: overrides.workMode ?? null,
+        location: overrides.location ?? null,
+        stipend: overrides.stipend ?? null,
+        currency: overrides.stipend == null ? null : 'BRL',
       }).lastInsertRowid,
   );
   db.prepare(

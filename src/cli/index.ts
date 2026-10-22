@@ -1,10 +1,19 @@
 #!/usr/bin/env node
 import { Command } from 'commander';
-import { ConfigError, loadConfig, loadProfile, verifyApprovedCv } from '../config/index.js';
+import {
+  ConfigError,
+  loadConfig,
+  loadProfile,
+  verifyApprovedCv,
+  type CvReference,
+  type Profile,
+} from '../config/index.js';
 import { getMigrationStatus, openDatabase, runMigrations } from '../db/index.js';
 import { runRealScan, runSimulation, type ScanReport } from '../discovery/index.js';
 import {
+  CHANNELS,
   STATUSES,
+  type Channel,
   countByStatus,
   getApplication,
   getHistory,
@@ -12,9 +21,18 @@ import {
   recoverInterrupted,
   type Status,
 } from '../applications/index.js';
-import { analyzeJobs, VERDICTS, type Verdict } from '../eligibility/index.js';
+import {
+  addQuestion,
+  answerRequirement,
+  getPreparation,
+  listCandidates,
+  markReviewed,
+  prepareApplication,
+} from '../preparation/index.js';
+import { analyzeJobs, profileHash, VERDICTS, type Verdict } from '../eligibility/index.js';
 import { loadSourcesConfig } from '../sources/index.js';
 import { formatAnalysis } from './analyze.js';
+import { formatCandidates, formatPrepareResult, formatPreview } from './preparation.js';
 import {
   formatApplication,
   formatApplicationList,
@@ -273,6 +291,130 @@ applications
       ids.length === 0
         ? 'Nenhum envio interrompido.'
         : `Movidas para intervenção humana: ${ids.map((id) => `#${id}`).join(', ')}.`,
+    );
+  });
+
+/** Perfil aprovado + currículo conferido pelo SHA-256; sem isso nada é preparado. */
+function approvedContext(): { profile: Profile; cv: CvReference } {
+  const profile = loadProfile(loadConfig().profilePath);
+  if (profile === undefined)
+    throw new Error('Perfil não encontrado. Veja config/profile.example.json.');
+  if (profile.approval === undefined)
+    throw new Error('O perfil ainda não foi aprovado (approval ausente).');
+  const cv = verifyApprovedCv(profile);
+  if (!cv.ok) throw new Error(`Currículo não confere com o aprovado: ${cv.reason}.`);
+  return { profile, cv: cv.cv };
+}
+
+applications
+  .command('candidates')
+  .description('Lista vagas elegíveis (aptas ou em revisão) que ainda não têm candidatura')
+  .action(() => {
+    const { profile } = approvedContext();
+    console.log(formatCandidates(withDb((db) => listCandidates(db, profileHash(profile)))));
+  });
+
+applications
+  .command('prepare <vaga>')
+  .description('Prepara a candidatura de uma vaga em dry-run (gera o rascunho; nada é enviado)')
+  .option('--channel <canal>', `canal previsto (${CHANNELS.join(', ')})`)
+  .option('--override-review <motivo>', 'decisão sua de preparar uma vaga em revisão humana')
+  .option(
+    '--acknowledge-equivalent <motivo>',
+    'confirma que a vaga equivalente já candidatada é outra',
+  )
+  .option('--regenerate', 'refaz um rascunho desatualizado')
+  .action(
+    (
+      vaga: string,
+      options: {
+        channel?: string;
+        overrideReview?: string;
+        acknowledgeEquivalent?: string;
+        regenerate?: boolean;
+      },
+    ) => {
+      if (
+        options.channel !== undefined &&
+        !(CHANNELS as readonly string[]).includes(options.channel)
+      ) {
+        throw new Error(`Canal inválido: ${options.channel}. Use ${CHANNELS.join(', ')}.`);
+      }
+      const { profile, cv } = approvedContext();
+      const result = withDb((db) =>
+        prepareApplication(db, {
+          profile,
+          cv,
+          jobId: parseId(vaga),
+          ...(options.channel === undefined ? {} : { channel: options.channel as Channel }),
+          ...(options.overrideReview === undefined
+            ? {}
+            : { reviewOverride: { reason: options.overrideReview } }),
+          ...(options.acknowledgeEquivalent === undefined
+            ? {}
+            : { acknowledgeEquivalent: { reason: options.acknowledgeEquivalent } }),
+          ...(options.regenerate === true ? { regenerate: true } : {}),
+        }),
+      );
+      console.log(formatPrepareResult(result));
+      if (result.outcome === 'recusada') process.exitCode = 1;
+    },
+  );
+
+applications
+  .command('preview <id>')
+  .alias('review')
+  .description('Mostra a mensagem preparada, a origem de cada afirmação e as pendências')
+  .option('--show-answers', 'mostra também as respostas registradas')
+  .option('--json', 'saída em JSON')
+  .action((id: string, options: { showAnswers?: boolean; json?: boolean }) => {
+    const { profile } = approvedContext();
+    const view = withDb((db) =>
+      getPreparation(db, parseId(id), {
+        profileHash: profileHash(profile),
+        showAnswers: options.showAnswers === true,
+      }),
+    );
+    if (view === undefined) throw new Error(`Candidatura ${id} não encontrada.`);
+    console.log(options.json === true ? JSON.stringify(view, null, 2) : formatPreview(view));
+  });
+
+applications
+  .command('add-question <id> <pergunta>')
+  .description(
+    'Registra uma pergunta de formulário: só o perfil aprovado responde o que sabe; o resto fica pendente',
+  )
+  .action((id: string, pergunta: string) => {
+    const { profile } = approvedContext();
+    const result = withDb((db) => addQuestion(db, parseId(id), profile, pergunta));
+    console.log(
+      result.answered
+        ? `Pergunta ${result.key}: respondida com o perfil aprovado.`
+        : `Pergunta ${result.key}: PENDENTE (nenhuma resposta foi inventada). Responda com "applications answer".`,
+    );
+  });
+
+applications
+  .command('answer <id> <chave>')
+  .description('Você responde uma pendência')
+  .requiredOption('--text <texto>', 'a resposta')
+  .action((id: string, chave: string, options: { text: string }) => {
+    withDb((db) => {
+      answerRequirement(db, parseId(id), chave, options.text);
+    });
+    console.log(`Pendência ${chave} respondida.`);
+  });
+
+applications
+  .command('confirm-review <id>')
+  .description('Confirma que você revisou este rascunho (não aprova o envio)')
+  .action((id: string) => {
+    const { profile } = approvedContext();
+    withDb((db) => {
+      markReviewed(db, parseId(id), profileHash(profile));
+    });
+    console.log(
+      `Rascunho da candidatura #${id} marcado como revisado. Ainda NÃO está aprovado para envio.`,
     );
   });
 

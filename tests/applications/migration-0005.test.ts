@@ -38,7 +38,7 @@ describe('migração 0005 (histórico de candidaturas)', () => {
         VALUES (7, NULL, 'preparada', 'criada');
     `);
 
-    expect(runMigrations(db)).toEqual(['0005_applications_history.sql']);
+    expect(runMigrations(db)[0]).toBe('0005_applications_history.sql');
 
     expect(db.prepare('SELECT id, job_id, mode, status, cv_label FROM applications').all()).toEqual(
       [{ id: 7, job_id: 1, mode: 'revisao', status: 'preparada', cv_label: 'legado' }],

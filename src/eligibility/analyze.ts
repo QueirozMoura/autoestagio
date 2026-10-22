@@ -37,6 +37,8 @@ export interface AnalysisReport {
 export interface AnalyzeOptions {
   db: Db;
   profile: Profile;
+  /** Restringe a análise a estas vagas (padrão: todas). */
+  jobIds?: readonly number[];
   /** Grava o resultado em `job_eligibility` (padrão: sim). */
   save?: boolean;
   now?: Date;
@@ -52,7 +54,7 @@ export function profileHash(profile: Profile): string {
  * resultado em `job_eligibility`. Repetir com o mesmo perfil e as mesmas vagas dá o mesmo resultado.
  */
 export function analyzeJobs(options: AnalyzeOptions): AnalysisReport {
-  const { db, profile, save = true } = options;
+  const { db, profile, save = true, jobIds } = options;
   const now = options.now ?? new Date();
   const hash = profileHash(profile);
   const rows = db
@@ -62,6 +64,7 @@ export function analyzeJobs(options: AnalyzeOptions): AnalysisReport {
          FROM jobs ORDER BY id`,
     )
     .all() as JobRow[];
+  const selected = jobIds === undefined ? rows : rows.filter((row) => jobIds.includes(row.id));
 
   const upsert = db.prepare(
     `INSERT INTO job_eligibility (
@@ -78,7 +81,7 @@ export function analyzeJobs(options: AnalyzeOptions): AnalysisReport {
   const counts: Record<Verdict, number> = { apto: 0, inapto: 0, revisao_humana: 0 };
   const jobs: AnalyzedJob[] = [];
   const run = db.transaction(() => {
-    for (const row of rows) {
+    for (const row of selected) {
       const result = evaluateJob(
         profile,
         {
@@ -112,5 +115,5 @@ export function analyzeJobs(options: AnalyzeOptions): AnalysisReport {
   });
   run();
 
-  return { total: rows.length, counts, jobs, saved: save };
+  return { total: selected.length, counts, jobs, saved: save };
 }
