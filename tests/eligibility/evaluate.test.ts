@@ -396,3 +396,38 @@ describe('segmentação (obrigatório × diferencial)', () => {
     expect(b?.context).toBe('requisito');
   });
 });
+
+describe('idioma — perfil com inglês só em leitura técnica', () => {
+  const reading = profile({
+    languages: [{ language: 'Inglês', level: 'intermediario', scope: 'leitura-tecnica' }],
+  });
+  const lang = (description: string) =>
+    find(evaluate(job({ description }), reading).criteria, 'idioma');
+
+  it('conversação nunca é presumida, mesmo com o nível numérico suficiente', () => {
+    expect(lang('Requisitos: inglês intermediário para conversação.')?.outcome).toBe(
+      'indeterminado',
+    );
+    expect(lang('Requisitos: inglês fluente.')?.outcome).toBe('indeterminado');
+    expect(lang('Requisitos: inglês básico falado.')?.outcome).toBe('indeterminado');
+  });
+
+  it('exigência de leitura/documentação dentro do nível atende', () => {
+    expect(lang('Requisitos: inglês intermediário para leitura de documentação.')?.outcome).toBe(
+      'atende',
+    );
+    expect(lang('Requisitos: leitura técnica em inglês.')?.outcome).toBe('atende');
+  });
+
+  it('exigência genérica sem dizer o uso é ambígua: revisão, não apto', () => {
+    const result = evaluate(job({ description: 'Requisitos: inglês intermediário.' }), reading);
+    expect(find(result.criteria, 'idioma')?.outcome).toBe('indeterminado');
+    expect(result.verdict).toBe('revisao_humana');
+  });
+
+  it('nível exigido acima do comprovado reprova mesmo sem dizer o uso', () => {
+    const result = evaluate(job({ description: 'Requisitos: inglês avançado.' }), reading);
+    expect(find(result.criteria, 'idioma')?.outcome).toBe('nao_atende');
+    expect(result.verdict).toBe('inapto');
+  });
+});

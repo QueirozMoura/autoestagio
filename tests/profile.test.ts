@@ -46,11 +46,13 @@ describe('parseProfile', () => {
       approval: { cvFile: 'cv.pdf', approvedAt: '2026-10-22' },
     });
     expect(ok.languages?.[0]?.level).toBe('intermediario');
+    expect(ok.languages?.[0]?.scope).toBe('geral'); // padrão: sem restrição de uso
 
     for (const invalid of [
       { languages: [{ language: 'Inglês', level: 'nativo' }] },
       { availability: { hoursPerWeek: { min: 30, max: 20 }, startFrom: '2026-12-01' } },
       { availability: { hoursPerWeek: { min: 20, max: 30 }, startFrom: 'dezembro' } },
+      { languages: [{ language: 'Inglês', level: 'basico', scope: 'conversacao' }] },
       { commute: [{ keywords: [], minutesPerWay: 45, source: 'teste' }] },
       { approval: { cvFile: 'cv.pdf', approvedAt: 'ontem' } },
     ]) {

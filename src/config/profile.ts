@@ -26,12 +26,24 @@ export const profileSchema = z.object({
     course: z.string().min(1),
     institution: z.string().min(1),
     expectedGraduationYear: z.number().int().min(2000).max(2100),
+    /** Mês previsto (1-12), quando confirmado. A análise ainda compara só o ano. */
+    expectedGraduationMonth: z.number().int().min(1).max(12).optional(),
     degreeType: z.enum(DEGREE_TYPES).optional(),
     /** Semestre em curso, quando confirmado pelo usuário. */
     currentSemester: z.number().int().min(1).max(16).optional(),
   }),
   languages: z
-    .array(z.object({ language: z.string().min(1), level: z.enum(LANGUAGE_LEVELS) }))
+    .array(
+      z.object({
+        language: z.string().min(1),
+        level: z.enum(LANGUAGE_LEVELS),
+        /**
+         * `leitura-tecnica`: o nível vale só para leitura técnica e documentação; conversação e
+         * escrita não estão comprovadas. `geral` (padrão): o nível vale para qualquer uso.
+         */
+        scope: z.enum(['geral', 'leitura-tecnica']).default('geral'),
+      }),
+    )
     .optional(),
   availability: z
     .object({

@@ -46,9 +46,19 @@ export function languageLevelsIn(text: string): LanguageLevel[] {
   return LEVEL_PATTERNS.filter(([pattern]) => pattern.test(text)).map(([, level]) => level);
 }
 
-function profileLevel(profile: Profile, language: string): LanguageLevel | undefined {
-  return profile.languages?.find((entry) => LANGUAGE_KEYS[norm(entry.language)] === language)
-    ?.level;
+function profileEntry(profile: Profile, language: string) {
+  return profile.languages?.find((entry) => LANGUAGE_KEYS[norm(entry.language)] === language);
+}
+
+/** A exigência fala de uso oral (conversação, fluência) ou de leitura/documentação? */
+const ORAL =
+  /\b(?:conversac\w*|falad\w*|oral|speaking|speak|fala|fluente|fluent|fluencia|bilingue|reunioes?)\b/;
+const READING = /\b(?:leitura|reading|read|documentacao|documentation|artigos?)\b/;
+type Skill = 'oral' | 'leitura' | 'geral';
+function skillOf(text: string): Skill {
+  if (ORAL.test(text)) return 'oral';
+  if (READING.test(text)) return 'leitura';
+  return 'geral';
 }
 
 export function languageCriteria(segments: readonly Segment[], profile: Profile): Criterion[] {
@@ -56,6 +66,7 @@ export function languageCriteria(segments: readonly Segment[], profile: Profile)
     kind: 'obrigatorio' | 'diferencial';
     weak: boolean;
     level: LanguageLevel | undefined;
+    skill: Skill;
     evidence: string;
   }
   const found = new Map<string, Found>();
@@ -79,7 +90,13 @@ export function languageCriteria(segments: readonly Segment[], profile: Profile)
         (level !== undefined &&
           (previous.level === undefined || rank(level) > rank(previous.level)))
       ) {
-        found.set(key, { kind, weak: strength === 'fraco', level, evidence: segment.text });
+        found.set(key, {
+          kind,
+          weak: strength === 'fraco',
+          level,
+          skill: skillOf(segment.norm),
+          evidence: segment.text,
+        });
       }
     }
   }
@@ -87,7 +104,8 @@ export function languageCriteria(segments: readonly Segment[], profile: Profile)
   const criteria: Criterion[] = [];
   for (const [key, entry] of found) {
     const language = key.split('|')[0] ?? '';
-    const have = profileLevel(profile, language);
+    const known = profileEntry(profile, language);
+    const have = known?.level;
     const label =
       entry.level === undefined
         ? `${language} (nível não especificado)`
@@ -97,6 +115,22 @@ export function languageCriteria(segments: readonly Segment[], profile: Profile)
     if (have === undefined) {
       outcome = 'indeterminado';
       detail = `Vaga cita ${label}; o perfil aprovado não informa nível de ${language}.`;
+    } else if (known?.scope === 'leitura-tecnica') {
+      // O perfil só comprova leitura técnica: conversação/escrita nunca são presumidas.
+      const mine = `${language} ${LEVEL_LABEL[have]} (apenas leitura técnica)`;
+      if (entry.skill === 'oral') {
+        outcome = 'indeterminado';
+        detail = `Vaga: ${label} em uso oral; perfil: ${mine}, conversação não comprovada.`;
+      } else if (entry.level !== undefined && rank(have) < rank(entry.level)) {
+        outcome = 'nao_atende';
+        detail = `Vaga: ${label}; perfil: ${mine}, abaixo do exigido até para leitura.`;
+      } else if (entry.skill === 'leitura') {
+        outcome = rank(have) >= rank('basico') ? 'atende' : 'indeterminado';
+        detail = `Vaga: ${label} para leitura; perfil: ${mine}.`;
+      } else {
+        outcome = 'indeterminado';
+        detail = `Vaga: ${label} sem dizer o uso (leitura ou conversação); perfil: ${mine}.`;
+      }
     } else if (entry.level === undefined) {
       outcome = rank(have) >= rank('intermediario') ? 'atende' : 'indeterminado';
       detail = `Vaga cita ${label}; perfil: ${language} ${LEVEL_LABEL[have]}.`;
