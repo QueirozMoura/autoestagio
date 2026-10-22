@@ -22,17 +22,26 @@ export const approvedVariants = (block: VariantBlock): Variant[] =>
   block.variants.filter(isUsableVariant);
 
 /**
- * Variante aprovada para a área: a específica da área; senão a genérica (sem área). Nunca a de outra
- * área. Entre aprovadas, a `editada` (revisada) vence a do PDF.
+ * Bloco "diferenciado por área": tem alguma variante marcada com área (aprovada ou não). Nele, a
+ * seleção é estrita: sem área só vale a genérica; com área só vale a variante daquela área, e a
+ * genérica NUNCA a substitui (nem quando a específica está em rascunho, rejeitada ou ausente).
+ */
+const isAreaDifferentiated = (block: VariantBlock): boolean =>
+  block.variants.some((v) => v.areas.length > 0);
+
+/**
+ * Variante aprovada para o pedido:
+ *  - sem área: a genérica (sem área). Uma variante de área nunca serve a um pedido sem área.
+ *  - com área, em bloco diferenciado por área (ex.: resumo): só a variante daquela área.
+ *  - com área, em bloco sem variantes por área (ex.: bullets, cabeçalho): a genérica.
+ * Entre aprovadas, a `editada` (revisada) vence a do PDF.
  */
 export function selectVariant(block: VariantBlock, area?: Area): Variant | undefined {
   const usable = [...approvedVariants(block)].sort(
     (a, b) => Number(b.origin === 'editada') - Number(a.origin === 'editada'),
   );
-  if (area !== undefined) {
-    const specific = usable.find((v) => v.areas.includes(area));
-    if (specific !== undefined) return specific;
-  }
+  if (area === undefined) return usable.find((v) => v.areas.length === 0);
+  if (isAreaDifferentiated(block)) return usable.find((v) => v.areas.includes(area));
   return usable.find((v) => v.areas.length === 0);
 }
 

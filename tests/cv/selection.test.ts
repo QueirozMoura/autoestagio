@@ -80,18 +80,49 @@ describe('variantes: só as aprovadas valem', () => {
     expect(selectVariant(model.summary)?.id).toBe('resumo-aprovada');
   });
 
-  it('por área: usa a da área, senão a genérica aprovada; nunca a de outra área nem um rascunho', () => {
+  it('com área: só a variante daquela área; a genérica nunca a substitui', () => {
     const model = fresh();
     addEdited(model.summary, 'resumo-qa', 'aprovado', ['qa']);
     addEdited(model.summary, 'resumo-infra-rascunho', 'rascunho', ['infraestrutura']);
+    const generic = model.summary.variants[0];
+    approve(generic);
     expect(selectVariant(model.summary, 'qa')?.id).toBe('resumo-qa');
+    // Específica em rascunho, ausente ou de outra área: nada (a genérica aprovada NÃO entra no lugar).
     expect(selectVariant(model.summary, 'infraestrutura')).toBeUndefined();
     expect(selectVariant(model.summary, 'banco-de-dados')).toBeUndefined();
+    expect(selectVariant(model.summary, 'suporte')).toBeUndefined();
+    expect(selectVariant(model.summary, 'dados')).toBeUndefined();
+  });
+
+  it('sem área: só a genérica; uma variante de área nunca serve a um pedido sem área', () => {
+    const model = fresh();
+    addEdited(model.summary, 'resumo-qa', 'aprovado', ['qa']);
     expect(selectVariant(model.summary)).toBeUndefined();
-    const generic = model.summary.variants[0];
-    if (generic) approve(generic);
-    expect(selectVariant(model.summary, 'infraestrutura')?.id).toBe(generic?.id);
+    addEdited(model.summary, 'resumo-geral', 'aprovado', []);
+    expect(selectVariant(model.summary)?.id).toBe('resumo-geral');
     expect(selectVariant(model.summary, 'qa')?.id).toBe('resumo-qa');
+  });
+
+  it('genérica em rascunho ou rejeitada não atende o pedido sem área', () => {
+    const model = fresh();
+    addEdited(model.summary, 'resumo-geral', 'rascunho', []);
+    addEdited(model.summary, 'resumo-geral-rejeitado', 'rejeitado', []);
+    addEdited(model.summary, 'resumo-qa', 'aprovado', ['qa']);
+    expect(selectVariant(model.summary)).toBeUndefined();
+  });
+
+  it('blocos sem variantes por área (cabeçalho, bullets) usam a genérica em qualquer pedido', () => {
+    const model = fresh();
+    const bullet = model.experience[0]?.bullets[0];
+    if (bullet === undefined) throw new Error('sem bullet');
+    approve(bullet.variants[0]);
+    approve(model.identity.headline.variants[0]);
+    for (const area of [undefined, 'qa', 'suporte', 'dados'] as const) {
+      expect(selectVariant(bullet, area)?.id).toBe(bullet.variants[0]?.id);
+      expect(selectVariant(model.identity.headline, area)?.id).toBe(
+        model.identity.headline.variants[0]?.id,
+      );
+    }
   });
 
   it('status "rejeitado" é aceito no esquema, mas não pode ter data de aprovação', () => {
@@ -129,6 +160,24 @@ describe('blocos obrigatórios', () => {
     expect(requiredBlocksWithoutApproval(model, 'qa')).toEqual([]);
     expect(requiredBlocksWithoutApproval(model, 'infraestrutura')).toEqual(['resumo']);
     expect(() => selectForResume(model, 'infraestrutura')).toThrow(MissingApprovedVariantError);
+  });
+
+  it('com resumo genérico aprovado, áreas sem variante específica continuam bloqueadas', () => {
+    const model = fresh();
+    approve(model.identity.headline.variants[0]);
+    addEdited(model.summary, 'resumo-geral', 'aprovado', []);
+    addEdited(model.summary, 'resumo-dev', 'aprovado', ['desenvolvimento']);
+    addEdited(model.summary, 'resumo-qa', 'aprovado', ['qa']);
+
+    expect(requiredBlocksWithoutApproval(model)).toEqual([]);
+    expect(selectForResume(model).get('resumo')?.id).toBe('resumo-geral');
+    expect(requiredBlocksWithoutApproval(model, 'qa')).toEqual([]);
+    expect(selectForResume(model, 'qa').get('resumo')?.id).toBe('resumo-qa');
+    expect(selectForResume(model, 'desenvolvimento').get('resumo')?.id).toBe('resumo-dev');
+    for (const area of ['suporte', 'dados', 'infraestrutura'] as const) {
+      expect(requiredBlocksWithoutApproval(model, area)).toEqual(['resumo']);
+      expect(() => selectForResume(model, area)).toThrow(MissingApprovedVariantError);
+    }
   });
 
   it('o currículo montado só contém variantes aprovadas; opcionais sem aprovada ficam de fora', () => {

@@ -58,6 +58,18 @@ Depois da extração, os textos que você revisou entram **sem tocar nos do PDF*
 
 A fidelidade com o PDF mede só as variantes `mestre`; as `editada` não entram nela.
 
+## Seleção de variantes (`src/cv/selection.ts`)
+
+Só vale variante `aprovado` com data; rascunho e `rejeitado` nunca são escolhidas.
+
+- **Sem área:** só a variante genérica (sem área). Variante de área nunca atende um pedido sem área.
+- **Com área, em bloco diferenciado por área (o resumo):** só a variante daquela área. A genérica **não**
+  substitui uma específica ausente, em rascunho ou rejeitada (por isso Suporte e Dados seguem bloqueados).
+- **Com área, em bloco sem variantes por área (cabeçalho, bullets):** a genérica.
+- Bloco obrigatório sem variante utilizável faz `selectForResume` falhar (`MissingApprovedVariantError`).
+- Aprovar variantes não aprova o modelo: `isModelFullyApproved` exige `approval` válido para o conteúdo
+  atual e ao menos uma variante aprovada em cada bloco.
+
 ## Relatório de fidelidade
 
 Compara o modelo com o PDF por métodos independentes da leitura estrutural:
