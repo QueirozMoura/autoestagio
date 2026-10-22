@@ -20,6 +20,8 @@ const envSchema = z
     GOOGLE_OAUTH_CLIENT_PATH: z.string().min(1).default('config/google-oauth-client.json'),
     GMAIL_TOKEN_PATH: z.string().min(1).default('data/gmail-token.json'),
     EMAIL_CONFIG_PATH: z.string().min(1).default('config/email.json'),
+    /** Modelo mestre do currículo (dados pessoais; fora do Git). */
+    CV_MODEL_PATH: z.string().min(1).default('config/cv-master.json'),
   })
   .superRefine((env, ctx) => {
     if (env.APPLY_MODE !== 'auto') return;
@@ -48,6 +50,7 @@ export interface AppConfig {
   oauthClientPath: string;
   tokenPath: string;
   emailConfigPath: string;
+  cvModelPath: string;
 }
 
 export function parseEnv(source: Record<string, string | undefined>): AppConfig {
@@ -66,6 +69,7 @@ export function parseEnv(source: Record<string, string | undefined>): AppConfig 
     oauthClientPath: env.GOOGLE_OAUTH_CLIENT_PATH,
     tokenPath: env.GMAIL_TOKEN_PATH,
     emailConfigPath: env.EMAIL_CONFIG_PATH,
+    cvModelPath: env.CV_MODEL_PATH,
   };
 }
 

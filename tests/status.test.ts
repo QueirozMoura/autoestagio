@@ -25,6 +25,7 @@ function makeConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     oauthClientPath: join(dir, 'client.json'),
     tokenPath: join(dir, 'token.json'),
     emailConfigPath: join(dir, 'email.json'),
+    cvModelPath: join(dir, 'cv-master.json'),
     ...overrides,
   };
 }

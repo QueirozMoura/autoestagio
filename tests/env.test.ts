@@ -52,3 +52,10 @@ describe('parseEnv — canal de e-mail', () => {
     ).toThrow(/ainda não foi implementado/);
   });
 });
+
+describe('parseEnv — modelo mestre do currículo', () => {
+  it('o caminho do modelo tem padrão em config/ (fora do Git) e pode ser sobrescrito', () => {
+    expect(parseEnv({}).cvModelPath).toBe('config/cv-master.json');
+    expect(parseEnv({ CV_MODEL_PATH: 'x/y.json' }).cvModelPath).toBe('x/y.json');
+  });
+});

@@ -9,6 +9,8 @@ data/*
 !data/.gitkeep
 config/profile.json
 config/sources.json
+config/cv-master.json
+config/cv-master.json.bak
 
 # spikes: dependências e saídas geradas (reproduzíveis)
 spikes/*/node_modules/
