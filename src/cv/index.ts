@@ -28,4 +28,14 @@ export {
   type CvMaster,
   type Proposal,
 } from './schema.js';
+export {
+  MissingApprovedVariantError,
+  approvedVariants,
+  isModelFullyApproved,
+  isUsableVariant,
+  requiredBlocksWithoutApproval,
+  selectForResume,
+  selectVariant,
+  type Variant,
+} from './selection.js';
 export { ModelExistsError, loadModel, saveModel, saveReport } from './store.js';

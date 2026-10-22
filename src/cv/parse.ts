@@ -120,6 +120,7 @@ function variantBlock(
         areas: [],
         technologies: [],
         origin: 'mestre',
+        basis: [],
         sourceRef: ref(section, lines, text),
         status: 'rascunho',
       },

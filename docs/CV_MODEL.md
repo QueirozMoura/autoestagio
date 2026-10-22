@@ -1,8 +1,8 @@
 # Modelo mestre do currículo (Etapa 4.1)
 
 Estrutura o currículo original em um modelo verificável, para que as próximas etapas personalizem sem
-inventar. **Nada aqui aprova coisa alguma**: todo bloco nasce `rascunho`, nenhum link nasce confirmado e o
-modelo não tem `approval`. O arquivo real do modelo contém dados pessoais: `config/cv-master.json` (0600),
+inventar. **A extração não aprova coisa alguma**: todo bloco nasce `rascunho`, nenhum link nasce confirmado e o
+modelo não tem `approval`. Só você aprova, registrando a data (veja "Textos revisados e curadoria"). O arquivo real do modelo contém dados pessoais: `config/cv-master.json` (0600),
 fora do Git. O PDF original nunca é modificado.
 
 ## Comandos
@@ -29,17 +29,34 @@ npm run dev -- cv status                                 # o que ainda está pen
 | `summary`                                            | resumo profissional (bloco com variantes; no mestre, só a variante original).              |
 | `experience` / `projects`                            | título exato, organização/cargo (subtrechos exatos), período, bullets, tecnologias, links. |
 | `skills`, `education`, `languages`, `certifications` | linhas do PDF com os campos derivados.                                                     |
-| `claims`                                             | afirmações a confirmar (todas `pendente`).                                                 |
+| `sectionTitles`                                      | títulos de seção que você aprovou (opcional).                                              |
+| `claims`                                             | afirmações a confirmar (nascem `pendente`; ao resolver, ganham `resolution`).              |
 | `proposals`                                          | variantes de resumo e destaques **propostos** (`status: "proposta"`), fora do currículo.   |
-| `approval`                                           | **ausente**. Só existe quando você aprovar o modelo (e exige todos os blocos aprovados).   |
+| `approval`                                           | **ausente** até você aprovar o modelo (exige ao menos uma variante aprovada por bloco).    |
 
 Regras impostas pelo esquema:
 
-- Todo texto tem `origin: "mestre"` e `sourceRef` (seção, página, linhas e SHA-256 do texto).
-- `status: "aprovado"` ⇔ `approvedAt` presente. Esta etapa nunca preenche nenhum dos dois.
+- Todo texto do PDF tem `origin: "mestre"` e `sourceRef` (seção, página, linhas e SHA-256 do texto).
+- `status: "aprovado"` ⇔ `approvedAt` presente. A extração nunca preenche nenhum dos dois.
 - Links: `confirmedByUser` começa `false`. Estar no PDF não aprova o link.
 - Ids únicos em todo o modelo (a seleção, os validadores e o histórico referenciam blocos por id).
 - Preparado para o inglês no futuro, sem implementá-lo: o modelo é `pt-BR` hoje.
+
+## Textos revisados e curadoria
+
+Depois da extração, os textos que você revisou entram **sem tocar nos do PDF**:
+
+- **Variantes `editada`** (resumo, bullets, variantes por área): `derivedFrom` aponta a variante do mestre de
+  onde saíram e `basis` (obrigatório) diz por quê. O texto do mestre continua intacto ao lado.
+- **`curated`** em entradas (título, tecnologias), skills e certificações (com `withheld` para o que ainda
+  não foi conferido), e `sectionTitles`. O valor do PDF fica nos campos originais.
+- **`basis`** separa a origem: `declaracao_proprietario` (o que você declarou; **não** é evidência),
+  `decisao_proprietario`, `evidencia_codigo`, `evidencia_execucao` e `evidencia_publica`.
+- **`claims[].resolution`**: afirmação `confirmada` ou `rejeitada` exige `resolution` (data, nota, bases).
+  O `cv report` respeita o que já foi resolvido e só lista as pendentes.
+- Declarações detalhadas ficam em `data/cv-declarations.json` (local, 0600, fora do Git).
+
+A fidelidade com o PDF mede só as variantes `mestre`; as `editada` não entram nela.
 
 ## Relatório de fidelidade
 

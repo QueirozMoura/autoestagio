@@ -37,7 +37,23 @@ export function buildReport(input: {
   now?: Date;
 }): CvReport {
   const { model, extraction } = input;
-  const { claims, inconsistencies } = detectClaims(model);
+  const detected = detectClaims(model);
+  // O estado das afirmações vem do modelo (o que você já resolveu); a detecção só aponta o que existe.
+  const stored = new Map(model.claims.map((c) => [c.id, c]));
+  const claims = detected.claims.map((c) => {
+    const known = stored.get(c.id);
+    return known === undefined
+      ? c
+      : {
+          ...c,
+          status: known.status,
+          ...(known.resolution ? { resolution: known.resolution } : {}),
+        };
+  });
+  const open = claims.filter((c) => c.kind === 'inconsistencia' && c.status === 'pendente');
+  const inconsistencies = detected.inconsistencies.filter((why) =>
+    open.some((c) => c.question.startsWith(why)),
+  );
   const blocks = [
     model.identity.headline,
     model.summary,
@@ -101,10 +117,16 @@ export function formatReport(report: CvReport, model: CvMaster): string {
   ])
     lines.push(`  ! ${detail}`);
 
-  lines.push('', `══ AFIRMAÇÕES QUE PRECISAM DA SUA CONFIRMAÇÃO (${report.claims.length}) ══`);
-  const kinds = [...new Set(report.claims.map((c) => c.kind))];
+  const pending = report.claims.filter((c) => c.status === 'pendente');
+  const confirmed = report.claims.filter((c) => c.status === 'confirmada').length;
+  const rejected = report.claims.filter((c) => c.status === 'rejeitada').length;
+  lines.push(
+    '',
+    `══ AFIRMAÇÕES QUE PRECISAM DA SUA CONFIRMAÇÃO (${pending.length} pendentes de ${report.claims.length}; ${confirmed} confirmadas, ${rejected} rejeitadas) ══`,
+  );
+  const kinds = [...new Set(pending.map((c) => c.kind))];
   for (const kind of kinds) {
-    const group = report.claims.filter((c) => c.kind === kind);
+    const group = pending.filter((c) => c.kind === kind);
     lines.push(`── ${kind} (${group.length})`);
     for (const c of group.slice(0, kind === 'link' ? 0 : 20))
       lines.push(`  • [${c.blockId}] "${c.quote.slice(0, 110)}"\n      ? ${c.question}`);
@@ -154,7 +176,9 @@ export function formatReport(report: CvReport, model: CvMaster): string {
     '',
     '══ APROVAÇÃO ══',
     `Modelo aprovado: ${report.approval.modelApproved ? 'sim' : 'NÃO'} | blocos aprovados: ${pct(report.approval.blocksApproved, report.approval.blocksTotal)} | links confirmados: ${pct(report.approval.linksConfirmed, report.approval.linksTotal)}`,
-    'Nada foi aprovado, corrigido ou enviado. Tudo continua em rascunho até você decidir.',
+    report.approval.blocksApproved === 0 && report.approval.linksConfirmed === 0
+      ? 'Nada foi aprovado, corrigido ou enviado. Tudo continua em rascunho até você decidir.'
+      : 'Nada foi enviado. Só vale como aprovado o que você confirmou (status "aprovado" com data).',
   );
   return lines.join('\n');
 }

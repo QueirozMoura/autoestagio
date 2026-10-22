@@ -8,18 +8,23 @@ export interface TextUnit {
   text: string;
 }
 
-/** Todos os textos do modelo, na ordem em que aparecem no documento. */
+/** Variantes que vêm do PDF. As `editada`s são texto seu, revisado: o PDF não as confere. */
+const fromPdf = <V extends { origin: string }>(variants: V[]): V[] =>
+  variants.filter((v) => v.origin === 'mestre');
+
+/** Todos os textos do PDF no modelo, na ordem em que aparecem no documento. */
 export function modelTexts(model: CvMaster): TextUnit[] {
   const out: TextUnit[] = [
     { id: 'identity-name', section: 'cabecalho', text: model.identity.name.value },
   ];
-  for (const v of model.identity.headline.variants)
+  for (const v of fromPdf(model.identity.headline.variants))
     out.push({ id: v.id, section: 'cabecalho', text: v.text });
   out.push({ id: 'identity-location', section: 'cabecalho', text: model.identity.location.value });
   for (const c of model.identity.contacts)
     out.push({ id: `contact-${c.id}`, section: 'cabecalho', text: c.value });
   for (const l of model.identity.links) out.push({ id: l.id, section: 'cabecalho', text: l.label });
-  for (const v of model.summary.variants) out.push({ id: v.id, section: 'resumo', text: v.text });
+  for (const v of fromPdf(model.summary.variants))
+    out.push({ id: v.id, section: 'resumo', text: v.text });
   for (const [section, list] of [
     ['experiencia', model.experience],
     ['projetos', model.projects],
@@ -29,7 +34,7 @@ export function modelTexts(model: CvMaster): TextUnit[] {
       if (entry.period !== undefined)
         out.push({ id: `${entry.id}-period`, section, text: entry.period.label });
       for (const b of entry.bullets)
-        for (const v of b.variants) out.push({ id: v.id, section, text: v.text });
+        for (const v of fromPdf(b.variants)) out.push({ id: v.id, section, text: v.text });
       if (entry.technologies.length > 0)
         out.push({ id: `${entry.id}-techs`, section, text: entry.technologies.join(', ') });
       for (const l of entry.links) out.push({ id: l.id, section, text: l.label });

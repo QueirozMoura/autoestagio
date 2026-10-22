@@ -7,6 +7,9 @@ import { AREAS } from '../eligibility/areas.js';
  *
  * Regras que o esquema impõe:
  *  1. Todo texto do modelo veio do PDF mestre (`origin: 'mestre'`) e carrega a origem (`sourceRef`).
+ *     Textos revisados por você entram como variantes `origin: 'editada'`: derivam de uma variante
+ *     do mestre (`derivedFrom`), carregam o motivo (`basis`: declaração sua ou evidência técnica) e
+ *     NÃO entram na conferência de fidelidade com o PDF (o PDF só confere o que é do PDF).
  *  2. Nada nasce aprovado: `status` começa em `rascunho` e só vira `aprovado` com `approvedAt`
  *     (a aprovação é um ato seu, registrado depois; esta etapa nunca a preenche).
  *  3. Variantes e destaques propostos ficam em `proposals`, fora das seções do currículo, com
@@ -41,7 +44,8 @@ export const sourceRefSchema = z.object({
 export type SourceRef = z.infer<typeof sourceRefSchema>;
 
 const approvalShape = {
-  status: z.enum(['rascunho', 'aprovado']).default('rascunho'),
+  /** Só `aprovado` (com `approvedAt`) vale. `rascunho` e `rejeitado` nunca entram em um currículo. */
+  status: z.enum(['rascunho', 'aprovado', 'rejeitado']).default('rascunho'),
   approvedAt: isoDate.optional(),
 };
 const approvalConsistent = (value: { status: string; approvedAt?: string | undefined }): boolean =>
@@ -52,19 +56,54 @@ const approvalMessage = {
 
 const fact = z.object({ value: z.string().min(1), sourceRef: sourceRefSchema });
 
+/**
+ * Rastreabilidade de uma alteração ou confirmação: declarações suas e evidências técnicas ficam
+ * SEPARADAS (`kind`), para nunca passar uma declaração por evidência verificada.
+ */
+export const BASIS_KINDS = [
+  'declaracao_proprietario',
+  'decisao_proprietario',
+  'evidencia_codigo',
+  'evidencia_execucao',
+  'evidencia_publica',
+] as const;
+export const basisSchema = z.object({
+  kind: z.enum(BASIS_KINDS),
+  ref: z.string().min(1),
+  note: z.string().min(1),
+});
+export type Basis = z.infer<typeof basisSchema>;
+
+/** Carimbo de um texto curado por você: quando e por quê. */
+const curatedStamp = { approvedAt: isoDate, basis: z.array(basisSchema).min(1) };
+
 const variantSchema = z
   .object({
     id,
     text: z.string().min(1),
     areas: z.array(z.enum(AREAS)).default([]),
     technologies: z.array(z.string().min(1)).default([]),
-    origin: z.literal('mestre'),
+    origin: z.enum(['mestre', 'editada']),
+    /** Variante do mestre de onde a editada deriva (obrigatório se, e só se, `origin: 'editada'`). */
+    derivedFrom: id.optional(),
+    /** Por que o texto mudou (obrigatório nas editadas). */
+    basis: z.array(basisSchema).default([]),
+    /** Origem no PDF: nas editadas, a do texto de onde derivam. */
     sourceRef: sourceRefSchema,
     ...approvalShape,
   })
-  .refine(approvalConsistent, approvalMessage);
+  .refine(approvalConsistent, approvalMessage)
+  .refine((v) => (v.origin === 'editada') === (v.derivedFrom !== undefined), {
+    message: 'derivedFrom existe se, e somente se, a variante é "editada"',
+  })
+  .refine((v) => v.origin !== 'editada' || v.basis.length > 0, {
+    message: 'variante editada exige ao menos uma base (declaração ou evidência)',
+  });
 
-/** Bloco com 1+ variantes. No modelo mestre cada bloco tem exatamente a variante do PDF original. */
+/**
+ * Bloco com 1+ variantes. O PDF original dá a variante `mestre` de cada bloco; as `editada`s
+ * (textos revisados, variantes por área) convivem com ela, e só as aprovadas valem.
+ */
 const variantBlockSchema = z.object({
   id,
   required: z.boolean().default(false),
@@ -104,6 +143,17 @@ const entrySchema = z.object({
   bullets: z.array(variantBlockSchema).default([]),
   technologies: z.array(z.string().min(1)).default([]),
   links: z.array(linkSchema).default([]),
+  /** Título/tecnologias revisados por você (o título e as tecnologias do PDF ficam intactos acima). */
+  curated: z
+    .object({
+      title: z.string().min(1).optional(),
+      technologies: z.array(z.string().min(1)).min(1).optional(),
+      ...curatedStamp,
+    })
+    .refine((c) => c.title !== undefined || c.technologies !== undefined, {
+      message: 'curated sem título nem tecnologias',
+    })
+    .optional(),
   sourceRef: sourceRefSchema,
 });
 
@@ -122,14 +172,27 @@ const claimKinds = [
 export type ClaimKind = (typeof claimKinds)[number];
 
 /** Afirmação que exige a SUA confirmação (ou comprovação) antes de ser usada. */
-export const claimSchema = z.object({
-  id,
-  blockId: z.string().min(1),
-  kind: z.enum(claimKinds),
-  quote: z.string().min(1),
-  question: z.string().min(1),
-  status: z.enum(['pendente', 'confirmada', 'rejeitada']).default('pendente'),
-});
+export const claimSchema = z
+  .object({
+    id,
+    blockId: z.string().min(1),
+    kind: z.enum(claimKinds),
+    quote: z.string().min(1),
+    question: z.string().min(1),
+    status: z.enum(['pendente', 'confirmada', 'rejeitada']).default('pendente'),
+    /** Como foi resolvida (só você resolve): declaração sua e evidências técnicas, separadas. */
+    resolution: z
+      .object({
+        at: isoDate,
+        by: z.literal('proprietario'),
+        note: z.string().min(1),
+        basis: z.array(basisSchema).default([]),
+      })
+      .optional(),
+  })
+  .refine((c) => (c.status === 'pendente') === (c.resolution === undefined), {
+    message: 'afirmação resolvida exige resolution, e resolution só existe quando resolvida',
+  });
 export type Claim = z.infer<typeof claimSchema>;
 
 const proposalSchema = z.object({
@@ -177,6 +240,14 @@ export const cvMasterSchema = z
       links: z.array(linkSchema).default([]),
     }),
     summary: variantBlockSchema,
+    /** Títulos de seção aprovados por você (o PDF usa "Experiência profissional" e "Projetos"). */
+    sectionTitles: z
+      .object({
+        experience: z.string().min(1),
+        projects: z.string().min(1),
+        ...curatedStamp,
+      })
+      .optional(),
     experience: z.array(entrySchema).default([]),
     projects: z.array(entrySchema).default([]),
     skills: z
@@ -186,6 +257,14 @@ export const cvMasterSchema = z
           category: z.string().min(1),
           items: z.array(z.string().min(1)).min(1),
           text: z.string().min(1),
+          /** Versão revisada por você; a do PDF fica intacta acima. */
+          curated: z
+            .object({
+              items: z.array(z.string().min(1)).min(1),
+              text: z.string().min(1),
+              ...curatedStamp,
+            })
+            .optional(),
           sourceRef: sourceRefSchema,
         }),
       )
@@ -215,6 +294,16 @@ export const cvMasterSchema = z
           issuer: z.string().min(1),
           year: z.number().int().min(1990).max(2100),
           description: z.string().min(1).optional(),
+          /** Só o que você confirmou contra o comprovante; `withheld` = campos do PDF ainda não conferidos. */
+          curated: z
+            .object({
+              text: z.string().min(1),
+              title: z.string().min(1),
+              issuer: z.string().min(1),
+              withheld: z.array(z.enum(['year', 'description'])).default([]),
+              ...curatedStamp,
+            })
+            .optional(),
           sourceRef: sourceRefSchema,
         }),
       )
@@ -280,21 +369,44 @@ export const cvMasterSchema = z
     model.certifications.forEach((c, i) => {
       add(c.id, ['certifications', i, 'id']);
     });
-    // Aprovação do modelo inteiro só com tudo aprovado.
-    if (model.approval !== undefined) {
-      const everything = [
-        model.identity.headline,
-        model.summary,
-        ...model.experience.flatMap((e) => e.bullets),
-        ...model.projects.flatMap((e) => e.bullets),
-      ];
-      if (everything.some((b) => b.variants.some((v) => v.status !== 'aprovado'))) {
-        ctx.addIssue({
-          code: 'custom',
-          path: ['approval'],
-          message: 'o modelo só pode ser aprovado com todos os blocos aprovados',
-        });
-      }
+    const blocks = [
+      model.identity.headline,
+      model.summary,
+      ...model.experience.flatMap((e) => e.bullets),
+      ...model.projects.flatMap((e) => e.bullets),
+    ];
+    // Variante editada deriva de uma variante do mestre que existe no modelo.
+    const masterIds = new Set(
+      blocks.flatMap((b) => b.variants.filter((v) => v.origin === 'mestre').map((v) => v.id)),
+    );
+    for (const b of blocks)
+      for (const v of b.variants)
+        if (v.derivedFrom !== undefined && !masterIds.has(v.derivedFrom))
+          ctx.addIssue({
+            code: 'custom',
+            path: ['variants', v.id, 'derivedFrom'],
+            message: `derivedFrom aponta para variante do mestre inexistente: ${v.derivedFrom}`,
+          });
+    // Aprovação obsoleta: o conteúdo mudou depois de aprovado, então a aprovação não vale mais.
+    if (model.approval !== undefined && model.approval.modelHash !== modelHash(model)) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['approval', 'modelHash'],
+        message: 'aprovação obsoleta: o conteúdo do modelo mudou depois de aprovado',
+      });
+    }
+    // Aprovação do modelo inteiro: todo bloco precisa de ao menos uma variante aprovada
+    // (as demais variantes simplesmente não valem).
+    if (
+      model.approval !== undefined &&
+      blocks.some((b) => b.variants.every((v) => v.status !== 'aprovado'))
+    ) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['approval'],
+        message:
+          'o modelo só pode ser aprovado com todos os blocos com ao menos uma variante aprovada',
+      });
     }
   });
 

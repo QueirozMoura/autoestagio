@@ -138,7 +138,7 @@ export function registerCvCommands(program: Command): void {
           `Modelo aprovado: ${model.approval === undefined ? 'NÃO' : `sim (${model.approval.approvedAt})`}`,
           `Blocos aprovados: ${variants.filter((v) => v.status === 'aprovado').length}/${variants.length}`,
           `Links confirmados: ${links.filter((l) => l.confirmedByUser).length}/${links.length}`,
-          `Afirmações pendentes: ${model.claims.filter((c) => c.status === 'pendente').length}/${model.claims.length}`,
+          `Afirmações pendentes: ${model.claims.filter((c) => c.status === 'pendente').length}/${model.claims.length} (confirmadas: ${model.claims.filter((c) => c.status === 'confirmada').length}, rejeitadas: ${model.claims.filter((c) => c.status === 'rejeitada').length})`,
           `Propostas (não aprovadas): ${model.proposals.items.length}`,
         ].join('\n'),
       );

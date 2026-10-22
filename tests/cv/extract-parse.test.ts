@@ -271,7 +271,7 @@ describe('parseMaster', () => {
     };
     const result = cvMasterSchema.safeParse(modelApproval);
     expect(result.success).toBe(false);
-    expect(JSON.stringify(result.error?.issues)).toMatch(/todos os blocos aprovados/);
+    expect(JSON.stringify(result.error?.issues)).toMatch(/ao menos uma variante aprovada/);
 
     const dateWithoutStatus = structuredClone(model);
     const v2 = dateWithoutStatus.summary.variants[0];
