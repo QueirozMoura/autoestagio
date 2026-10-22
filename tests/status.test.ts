@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -8,6 +8,9 @@ import { openDatabase, runMigrations } from '../src/db/index.js';
 import { PROJECT_ROOT } from '../src/utils/paths.js';
 
 const tempDirs: string[] = [];
+
+const countMigrationFiles = (): number =>
+  readdirSync(join(PROJECT_ROOT, 'migrations')).filter((file) => file.endsWith('.sql')).length;
 
 function makeConfig(overrides: Partial<AppConfig> = {}): AppConfig {
   const dir = mkdtempSync(join(tmpdir(), 'autoestagio-'));
@@ -42,7 +45,7 @@ describe('collectStatus', () => {
 
     const report = collectStatus(config);
     expect(report.database.migrations?.pending).toEqual([]);
-    expect(report.database.migrations?.applied).toHaveLength(1);
+    expect(report.database.migrations?.applied).toHaveLength(countMigrationFiles());
     expect(formatStatus(report)).toContain('atualizado');
   });
 

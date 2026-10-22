@@ -5,8 +5,9 @@ Todos os dados ficam na sua máquina (SQLite).
 
 > **Objetivo e critérios de aceitação:** veja [docs/ACCEPTANCE.md](docs/ACCEPTANCE.md).
 >
-> **Status:** Fase 1 — Fundação. Ainda não há coleta de vagas, integração com Gmail,
-> Playwright nem candidaturas. Veja o [roteiro](#roteiro).
+> **Status:** Fase 2 em andamento (infraestrutura HTTP, normalização, deduplicação e persistência).
+> Ainda não há coleta real de vagas, integração com Gmail, Playwright nem candidaturas.
+> Veja o [roteiro](#roteiro).
 
 ## Requisitos
 
@@ -29,15 +30,45 @@ instalação falhar, instale as ferramentas de compilação (`build-essential` e
 
 ## Comandos
 
-| Comando                   | Descrição                                                   |
-| ------------------------- | ----------------------------------------------------------- |
-| `npm run dev -- status`   | Mostra modo, perfil e estado do banco (`--json` disponível) |
-| `npm run dev -- migrate`  | Cria o banco e aplica migrações pendentes                   |
-| `npm run build` / `start` | Compila para `dist/` e executa a versão compilada           |
-| `npm test`                | Testes (Vitest)                                             |
-| `npm run typecheck`       | Verificação de tipos (TypeScript strict)                    |
-| `npm run lint`            | ESLint                                                      |
-| `npm run format`          | Prettier                                                    |
+| Comando                          | Descrição                                                    |
+| -------------------------------- | ------------------------------------------------------------ |
+| `npm run dev -- status`          | Mostra modo, perfil e estado do banco (`--json` disponível)  |
+| `npm run dev -- migrate`         | Cria o banco e aplica migrações pendentes                    |
+| `npm run dev -- scan --simulate` | Coleta simulada com fontes fictícias, sem rede (veja abaixo) |
+| `npm run build` / `start`        | Compila para `dist/` e executa a versão compilada            |
+| `npm test`                       | Testes (Vitest)                                              |
+| `npm run typecheck`              | Verificação de tipos (TypeScript strict)                     |
+| `npm run lint`                   | ESLint                                                       |
+| `npm run format`                 | Prettier                                                     |
+
+## Scan simulado
+
+Nesta etapa só existe o modo simulado: fontes e vagas fictícias, **nenhuma requisição de rede**.
+
+```bash
+npm run dev -- scan --simulate              # roda em memória; nada é gravado em disco
+npm run dev -- scan --simulate --repeat 2   # a 2ª execução não cria nem altera nada (idempotência)
+npm run dev -- scan --simulate --db-file /tmp/sim.db   # guarda em um arquivo de teste
+```
+
+A simulação **nunca grava no banco real** (`DATABASE_PATH`), para não misturar vagas fictícias com
+as reais. Depois de atualizar o projeto, rode `npm run dev -- migrate` para aplicar as migrações novas.
+
+### Como as vagas são deduplicadas
+
+Uma vaga é considerada a mesma, em ordem de força da evidência:
+
+1. **Mesma fonte e mesmo identificador externo.** Dentro de uma fonte, ids diferentes são sempre
+   vagas diferentes.
+2. **URL canônica igual** (sem parâmetros de rastreamento, fragmento, `www.` ou barra final) **e**
+   título quase idêntico.
+3. **Empresa + título + local iguais _e_ descrição praticamente idêntica.** Empresa, título e
+   cidade, sozinhos, nunca provam duplicidade: sem a descrição, o par só é **sinalizado** em
+   `job_possible_duplicates` para revisão.
+
+Limitação conhecida: a deduplicação é incremental e não une vagas já gravadas (isso poderia quebrar
+análises e candidaturas que as referenciam). Se uma vaga nova ligar duas vagas que já estavam
+separadas, o par é sinalizado em vez de unido, e o resultado pode depender da ordem das fontes.
 
 ## Configuração
 
@@ -72,6 +103,9 @@ src/
   cli/      comandos (status, migrate)
   config/   validação de .env e perfil (Zod)
   db/       conexão SQLite e migrações
+  http/     cliente HTTP (timeout, retry, rate limit por host, robots.txt)
+  sources/  contratos dos adaptadores, configuração e registro de fontes
+  discovery/ normalização, deduplicação, persistência e scan
   utils/
 migrations/ SQL versionado (0001_*.sql, ...), com checksum
 config/     perfil

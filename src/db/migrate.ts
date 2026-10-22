@@ -54,19 +54,33 @@ export function runMigrations(db: Db, dir: string = DEFAULT_MIGRATIONS_DIR): str
   const insert = db.prepare('INSERT INTO schema_migrations (name, checksum) VALUES (?, ?)');
   const newlyApplied: string[] = [];
 
-  for (const migration of readMigrationFiles(dir)) {
-    const existing = applied.get(migration.name);
-    if (existing !== undefined) {
-      if (existing !== migration.checksum) {
-        throw new Error(`Migração ${migration.name} foi alterada após ser aplicada`);
+  // Reconstruir tabelas exige foreign keys desligadas (o PRAGMA não vale dentro de transação).
+  // Cada migração é conferida com `foreign_key_check` antes de confirmar, e as FKs são religadas.
+  const foreignKeysWereOn = db.pragma('foreign_keys', { simple: true }) === 1;
+  if (foreignKeysWereOn) db.pragma('foreign_keys = OFF');
+  try {
+    for (const migration of readMigrationFiles(dir)) {
+      const existing = applied.get(migration.name);
+      if (existing !== undefined) {
+        if (existing !== migration.checksum) {
+          throw new Error(`Migração ${migration.name} foi alterada após ser aplicada`);
+        }
+        continue;
       }
-      continue;
+      db.transaction(() => {
+        db.exec(migration.sql);
+        const violations = db.pragma('foreign_key_check') as unknown[];
+        if (violations.length > 0) {
+          throw new Error(
+            `Migração ${migration.name} violou ${violations.length} foreign key(s); revertida`,
+          );
+        }
+        insert.run(migration.name, migration.checksum);
+      })();
+      newlyApplied.push(migration.name);
     }
-    db.transaction(() => {
-      db.exec(migration.sql);
-      insert.run(migration.name, migration.checksum);
-    })();
-    newlyApplied.push(migration.name);
+  } finally {
+    if (foreignKeysWereOn) db.pragma('foreign_keys = ON');
   }
   return newlyApplied;
 }

@@ -51,7 +51,7 @@ Os números das fases seguem o roteiro do README e podem ser reordenados com aut
 
 - [x] Cliente HTTP com timeout, retry, `Retry-After`, rate limit por host e `robots.txt` (2.1).
 - [ ] Adaptadores independentes e testados com dados simulados.
-- [ ] Normalização e deduplicação de vagas entre fontes.
+- [x] Normalização, deduplicação e persistência de vagas entre fontes (2.2, com fontes simuladas).
 
 ### Análise e elegibilidade
 
