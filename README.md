@@ -3,6 +3,8 @@
 Sistema local para encontrar, analisar e gerenciar candidaturas a estágios em TI.
 Todos os dados ficam na sua máquina (SQLite).
 
+> **Objetivo e critérios de aceitação:** veja [docs/ACCEPTANCE.md](docs/ACCEPTANCE.md).
+>
 > **Status:** Fase 1 — Fundação. Ainda não há coleta de vagas, integração com Gmail,
 > Playwright nem candidaturas. Veja o [roteiro](#roteiro).
 

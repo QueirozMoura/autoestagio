@@ -1,0 +1,14 @@
+{
+  "http": {
+    "timeoutMs": 15000,
+    "maxRetries": 3,
+    "minIntervalMs": 2000,
+    "maxRetryAfterMs": 60000,
+    "respectRobots": true
+  },
+  "limits": {
+    "maxJobsPerSource": 500,
+    "maxPagesPerSource": 20
+  },
+  "targets": []
+}

@@ -8,6 +8,7 @@ coverage/
 data/*
 !data/.gitkeep
 config/profile.json
+config/sources.json
 
 # segredos
 .env
