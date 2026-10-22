@@ -2,6 +2,23 @@ import { existsSync, readFileSync } from 'node:fs';
 import { z } from 'zod';
 import { ConfigError } from './env.js';
 
+/** Níveis de idioma, do menor ao maior. Ausente no perfil = desconhecido (nunca presumido). */
+export const LANGUAGE_LEVELS = [
+  'nenhum',
+  'basico',
+  'intermediario',
+  'avancado',
+  'fluente',
+] as const;
+export type LanguageLevel = (typeof LANGUAGE_LEVELS)[number];
+
+export const DEGREE_TYPES = ['tecnologo', 'bacharelado', 'licenciatura'] as const;
+
+/**
+ * Os campos opcionais abaixo só valem se o usuário os confirmou (ou se vêm do currículo
+ * aprovado). Campo ausente significa "não informado": a análise de elegibilidade manda a vaga
+ * para revisão humana em vez de supor um valor.
+ */
 export const profileSchema = z.object({
   name: z.string().min(1),
   city: z.string().min(1),
@@ -9,7 +26,39 @@ export const profileSchema = z.object({
     course: z.string().min(1),
     institution: z.string().min(1),
     expectedGraduationYear: z.number().int().min(2000).max(2100),
+    degreeType: z.enum(DEGREE_TYPES).optional(),
+    /** Semestre em curso, quando confirmado pelo usuário. */
+    currentSemester: z.number().int().min(1).max(16).optional(),
   }),
+  languages: z
+    .array(z.object({ language: z.string().min(1), level: z.enum(LANGUAGE_LEVELS) }))
+    .optional(),
+  availability: z
+    .object({
+      hoursPerWeek: z
+        .object({ min: z.number().int().min(1).max(60), max: z.number().int().min(1).max(60) })
+        .refine((hours) => hours.min <= hours.max, 'min deve ser ≤ max'),
+      /** Primeira data (AAAA-MM-DD) em que o usuário pode começar. */
+      startFrom: z.iso.date(),
+    })
+    .optional(),
+  /**
+   * Tempos de deslocamento verificados pelo usuário (por trecho). Só o que está aqui é
+   * considerado "verificável"; local fora da lista = deslocamento desconhecido.
+   */
+  commute: z
+    .array(
+      z.object({
+        /** Palavras que identificam o local na vaga (bairro, empresa), sem acento e minúsculas. */
+        keywords: z.array(z.string().min(1)).min(1),
+        minutesPerWay: z.number().int().positive(),
+        /** Como foi verificado (ex.: "Google Maps, transporte público, 2026-10-22"). */
+        source: z.string().min(1),
+      }),
+    )
+    .optional(),
+  /** Presente somente depois que o usuário aprova o perfil extraído do currículo. */
+  approval: z.object({ cvFile: z.string().min(1), approvedAt: z.iso.date() }).optional(),
   level: z.enum(['estagio', 'junior']),
   areas: z.array(z.string().min(1)).min(1),
   technologies: z.array(z.string().min(1)).min(1),
@@ -23,8 +72,8 @@ export const profileSchema = z.object({
   minStipend: z.object({
     amount: z.number().nonnegative(),
     currency: z.string().length(3),
-    /** Vagas sem valor informado ficam pendentes de análise manual. */
-    whenUnknown: z.enum(['pendente', 'descartar']),
+    /** Vagas sem valor informado ficam pendentes de análise manual; nunca são descartadas. */
+    whenUnknown: z.literal('pendente'),
   }),
 });
 

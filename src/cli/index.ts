@@ -1,9 +1,11 @@
 #!/usr/bin/env node
 import { Command } from 'commander';
-import { ConfigError, loadConfig } from '../config/index.js';
+import { ConfigError, loadConfig, loadProfile } from '../config/index.js';
 import { getMigrationStatus, openDatabase, runMigrations } from '../db/index.js';
 import { runRealScan, runSimulation, type ScanReport } from '../discovery/index.js';
+import { analyzeJobs, VERDICTS, type Verdict } from '../eligibility/index.js';
 import { loadSourcesConfig } from '../sources/index.js';
+import { formatAnalysis } from './analyze.js';
 import { formatScanReport } from './scan.js';
 import { collectStatus, formatStatus } from './status.js';
 
@@ -106,6 +108,55 @@ program
       }
     },
   );
+
+program
+  .command('analyze')
+  .description(
+    'Classifica as vagas gravadas em apto, inapto ou revisão humana (somente análise local)',
+  )
+  .option('--no-save', 'não grava o resultado no banco')
+  .option('--verdict <veredito>', `mostra só este veredito (${VERDICTS.join(', ')})`)
+  .option('--verbose', 'mostra todos os critérios avaliados')
+  .option('--json', 'saída em JSON')
+  .action((options: { save: boolean; verdict?: string; verbose?: boolean; json?: boolean }) => {
+    const config = loadConfig();
+    const profile = loadProfile(config.profilePath);
+    if (profile === undefined) {
+      throw new Error(
+        `Perfil não encontrado em ${config.profilePath}. Veja config/profile.example.json.`,
+      );
+    }
+    if (
+      options.verdict !== undefined &&
+      !(VERDICTS as readonly string[]).includes(options.verdict)
+    ) {
+      throw new Error(`Veredito inválido: ${options.verdict}. Use ${VERDICTS.join(', ')}.`);
+    }
+    const db = openDatabase(config.databasePath);
+    try {
+      const { pending } = getMigrationStatus(db);
+      if (pending.length > 0) {
+        throw new Error(`Há migrações pendentes (${pending.join(', ')}). Rode "migrate" antes.`);
+      }
+      const report = analyzeJobs({ db, profile, save: options.save });
+      const shown =
+        options.verdict === undefined
+          ? report
+          : {
+              ...report,
+              jobs: report.jobs.filter(
+                (job) => job.result.verdict === (options.verdict as Verdict),
+              ),
+            };
+      console.log(
+        options.json === true
+          ? JSON.stringify(shown, null, 2)
+          : formatAnalysis(shown, options.verbose === true),
+      );
+    } finally {
+      db.close();
+    }
+  });
 
 try {
   await program.parseAsync();

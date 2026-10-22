@@ -26,4 +26,41 @@ describe('parseProfile', () => {
     const invalid = { ...base, minStipend: { ...base.minStipend, currency: 'REAIS' } };
     expect(() => parseProfile(invalid)).toThrow(/minStipend\.currency/);
   });
+
+  it('campos novos são opcionais: dado ausente significa "não informado"', () => {
+    const profile = parseProfile(example);
+    expect(profile.languages).toBeUndefined();
+    expect(profile.availability).toBeUndefined();
+    expect(profile.commute).toBeUndefined();
+    expect(profile.approval).toBeUndefined();
+    expect(profile.education.currentSemester).toBeUndefined();
+  });
+
+  it('valida idioma, disponibilidade, deslocamento e aprovação', () => {
+    const base = example as object;
+    const ok = parseProfile({
+      ...base,
+      languages: [{ language: 'Inglês', level: 'intermediario' }],
+      availability: { hoursPerWeek: { min: 20, max: 30 }, startFrom: '2026-12-01' },
+      commute: [{ keywords: ['pinheiros'], minutesPerWay: 45, source: 'teste' }],
+      approval: { cvFile: 'cv.pdf', approvedAt: '2026-10-22' },
+    });
+    expect(ok.languages?.[0]?.level).toBe('intermediario');
+
+    for (const invalid of [
+      { languages: [{ language: 'Inglês', level: 'nativo' }] },
+      { availability: { hoursPerWeek: { min: 30, max: 20 }, startFrom: '2026-12-01' } },
+      { availability: { hoursPerWeek: { min: 20, max: 30 }, startFrom: 'dezembro' } },
+      { commute: [{ keywords: [], minutesPerWay: 45, source: 'teste' }] },
+      { approval: { cvFile: 'cv.pdf', approvedAt: 'ontem' } },
+    ]) {
+      expect(() => parseProfile({ ...base, ...invalid })).toThrow(ConfigError);
+    }
+  });
+
+  it('vaga sem bolsa nunca é descartada: "descartar" é rejeitado', () => {
+    const base = example as { minStipend: object };
+    const invalid = { ...base, minStipend: { ...base.minStipend, whenUnknown: 'descartar' } };
+    expect(() => parseProfile(invalid)).toThrow(/whenUnknown/);
+  });
 });

@@ -4,7 +4,14 @@ import { parseEnv, type AppConfig } from './env.js';
 import { PROJECT_ROOT, resolveFromRoot } from '../utils/paths.js';
 
 export { ConfigError, APPLY_MODES, type ApplyMode, type AppConfig } from './env.js';
-export { loadProfile, parseProfile, profileSchema, type Profile } from './profile.js';
+export {
+  LANGUAGE_LEVELS,
+  loadProfile,
+  parseProfile,
+  profileSchema,
+  type LanguageLevel,
+  type Profile,
+} from './profile.js';
 
 /** Carrega `.env` (se existir) sem sobrescrever variáveis já definidas no ambiente. */
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {

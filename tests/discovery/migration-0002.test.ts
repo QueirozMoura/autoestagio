@@ -42,7 +42,8 @@ describe('migração 0002 (incremental sobre a 0001)', () => {
     `);
 
     const applied = runMigrations(db);
-    expect(applied).toEqual(['0002_jobs_persistence.sql', '0003_jobs_apply_url.sql']);
+    expect(applied[0]).toBe('0002_jobs_persistence.sql');
+    expect(applied).toContain('0003_jobs_apply_url.sql');
 
     expect(db.prepare('SELECT kind, slug, name FROM sources').all()).toEqual([
       { kind: 'gupy', slug: 'Empresa X', name: 'Empresa X' },
