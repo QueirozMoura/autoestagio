@@ -65,3 +65,22 @@ export {
   type Variant,
 } from './selection.js';
 export { ModelExistsError, loadModel, saveModel, saveReport } from './store.js';
+export {
+  DEFAULT_LAYOUT,
+  FONT_DIR,
+  FONT_FILES,
+  FONT_LICENSE_FILE,
+  FontLoadError,
+  MIN_BODY_PT,
+  RenderError,
+  layoutProblems,
+  loadFonts,
+  mergeLayout,
+  renderResume,
+  type FitStep,
+  type LayoutConfig,
+  type LayoutOverrides,
+  type RenderErrorCode,
+  type RenderOptions,
+  type RenderResult,
+} from './render/index.js';

@@ -90,6 +90,25 @@ intermediária para o futuro renderizador; **não gera PDF**) mais um manifesto 
   mesma saída.
 - Entradas sem nenhum bullet aprovado para a área são omitidas e registradas no manifesto.
 
+## Renderização com PDFKit (Etapa 4.3, fatia 1: `src/cv/render/`)
+
+`renderResume(resolved, { layout? })` desenha um `ResolvedResume` e devolve **os bytes em memória** (`{ bytes, pdfSha256,
+pages, fit, sourceContentSha256 }`). Não grava arquivo, não acessa banco nem rede e **não conhece o modelo mestre**:
+`src/cv/render/*` só importa `pdfkit`, utilitários neutros e _tipos_ do resolvido (um teste de arquitetura garante).
+
+- **Layout declarativo** (`layout.ts`): A4, uma coluna, margens, tipografia, espaçamento, cores, rótulos estruturais
+  ("Tecnologias:", "Links:", títulos fixos de seção) e limites de páginas, todos sobrescrevíveis.
+- **Regras ATS** (spike 4.0): sem tabelas nem imagens, texto real, Lato embutida com ToUnicode, **sem ligaduras**,
+  `•` real, título e período na mesma linha com `|`, URLs visíveis e clicáveis, PDF tagged, metadados fixos
+  (data de criação fixa, produtor neutro): mesma entrada, mesmos bytes.
+- **Fonte:** Lato (SIL OFL-1.1) em `assets/fonts/lato/`, com a licença ao lado.
+- **Páginas:** prioriza 1; permite até 2 (`pages.preferred`/`pages.max`). Se não couber, só tipografia e espaçamento
+  encolhem, por degraus (corpo nunca abaixo de 8 pt); **nunca** se remove, resume ou inventa texto. Se passar do
+  limite, `RenderError` com código `OVERFLOW` (sem PDF parcial). Outros códigos: `INVALID_LAYOUT`, `FONT_MISSING`,
+  `UNBREAKABLE_SEGMENT`.
+- Título de seção e de entrada não ficam órfãos no fim da página; e-mail, telefone e URLs nunca quebram no meio.
+- **Fora desta fatia:** validadores pós-render completos, CLI e persistência de PDFs.
+
 ## Relatório de fidelidade
 
 Compara o modelo com o PDF por métodos independentes da leitura estrutural:
