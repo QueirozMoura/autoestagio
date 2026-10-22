@@ -51,7 +51,7 @@ interface TextItem {
   fontName: string;
 }
 
-async function loadPdfjs(): Promise<typeof Pdfjs> {
+export async function loadPdfjs(): Promise<typeof Pdfjs> {
   // O pdf.js avisa que não achou o canvas opcional (usado só para desenhar). Não precisamos dele.
   const warn = console.warn;
   console.warn = () => undefined;

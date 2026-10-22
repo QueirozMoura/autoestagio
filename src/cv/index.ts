@@ -84,3 +84,16 @@ export {
   type RenderOptions,
   type RenderResult,
 } from './render/index.js';
+export {
+  NORMALIZATION_RULES,
+  expectedContent,
+  validateRenderedPdf,
+  type CheckId,
+  type CheckResult,
+  type Expected,
+  type ExtractorInfo,
+  type PopplerMode,
+  type PopplerRunner,
+  type ValidateOptions,
+  type ValidationReport,
+} from './validate/index.js';

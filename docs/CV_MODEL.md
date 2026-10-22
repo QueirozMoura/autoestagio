@@ -109,6 +109,30 @@ pages, fit, sourceContentSha256 }`). Não grava arquivo, não acessa banco nem r
 - Título de seção e de entrada não ficam órfãos no fim da página; e-mail, telefone e URLs nunca quebram no meio.
 - **Fora desta fatia:** validadores pós-render completos, CLI e persistência de PDFs.
 
+## Validação independente do PDF (Etapa 4.3, fatia 2, 1ª entrega: H1 a H4, `src/cv/validate/`)
+
+`validateRenderedPdf(bytes, resolved, opts)` relê o PDF gerado (só bytes em memória) e confere o que veio contra o
+`ResolvedResume`. **Ainda não é a validação completa**: `complete` é sempre `false` e o relatório lista `pending`
+(H5 a H10: frases proibidas, fontes, ligaduras, metadados, geometria, elementos perigosos). `ok: true` significa
+apenas "H1 a H4 passaram".
+
+- **Extratores:** `pdfjs-dist` (obrigatório) e Poppler/`pdftotext` (opcional; `poppler: 'auto' | 'require' | 'off'`,
+  padrão `auto`). O PDF vai ao Poppler pela entrada padrão: nenhum arquivo temporário. Se o Poppler existe e diverge,
+  a validação **falha**; se não existe, fica `skipped` (em `require`, é falha).
+- **H1:** cabeçalho `%PDF-`, `%%EOF`, abre no pdfjs, páginas entre 1 e o limite do layout (e igual a `expectedPages`,
+  se informado), nenhuma página em branco.
+- **H2 (conteúdo, bidirecional):** todo bloco esperado aparece no texto extraído E nada sobra (texto extra falha);
+  contagem de `•` conferida; o Poppler (`-raw`) precisa concordar com o pdfjs.
+- **H3 (ordem):** os blocos aparecem na ordem esperada no fluxo de conteúdo e na leitura geométrica; o Poppler (leitura
+  física) precisa concordar com a geometria do pdfjs.
+- **H4 (links):** URLs esperadas = anotações clicáveis = URLs visíveis (sem extras, só http/https), e cada área
+  clicável fica sobre o texto do seu link. A posição é **estimada** por caractere dentro da linha (o pdfjs funde e
+  parte trechos), com tolerância de 10 pt ou 25% da largura: pega âncora trocada ou deslocada, não mede ao milímetro.
+- **Normalização** (`NORMALIZATION_RULES`): só NFC, espaços/quebras, `|` e `•` estruturais e invisíveis; no Poppler,
+  o hífen no FIM da linha. Palavras, números, URLs, maiúsculas e hífens do meio da linha nunca são alterados.
+- **Sem duplicação frágil:** o texto esperado vem de `render/content.ts` (`describeContent`), o mesmo módulo que o
+  renderizador usa para compor títulos, rótulos e linhas de links.
+
 ## Relatório de fidelidade
 
 Compara o modelo com o PDF por métodos independentes da leitura estrutural:

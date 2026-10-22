@@ -1,6 +1,14 @@
 import { createHash } from 'node:crypto';
 import PDFDocument from 'pdfkit';
 import type { ResolvedEntry, ResolvedLink, ResolvedResume, ResolvedSection } from '../resolve.js';
+import {
+  headingText,
+  linkText,
+  linksLabel,
+  skillParts,
+  technologiesLabel,
+  technologiesText,
+} from './content.js';
 import { FontLoadError, loadFonts, type FontSet } from './fonts.js';
 import {
   layoutProblems,
@@ -270,14 +278,14 @@ async function renderPass(
   const linkUnits = (links: ResolvedLink[]): Unit[] =>
     links.map((l) => ({
       separator: '  |  ',
-      text: `${l.label}: ${l.url}`,
+      text: linkText(l),
       font: 'R',
       color: color.accent,
       url: l.url,
     }));
 
   const heading = (label: string, firstBlockHeight: number): void => {
-    const text = label.toLocaleUpperCase('pt-BR');
+    const text = headingText(label);
     const h = measure(text, 'B', size.heading, width) + gap.afterHeading + 3;
     // Título nunca fica sozinho no fim da página: leva junto o primeiro bloco.
     ensure(h + firstBlockHeight);
@@ -360,14 +368,14 @@ async function renderPass(
       pdf.y = y0 + h + gap.bullet;
     }
     if (item.technologies.length > 0)
-      labelled(`${layout.labels.technologies}:`, item.technologies.join(', '));
+      labelled(technologiesLabel(layout.labels), technologiesText(item));
     if (item.links.length > 0) {
       const units = linkUnits(item.links);
       const [first, ...rest] = units;
       if (first !== undefined)
         inline(
           [
-            { text: `${layout.labels.links}:`, font: 'B', color: color.text },
+            { text: linksLabel(layout.labels), font: 'B', color: color.text },
             { ...first, separator: ' ' },
             ...rest,
           ],
@@ -422,9 +430,9 @@ async function renderPass(
     const first = resume.skills[0];
     heading(layout.labels.skills, first ? measure(first.text, 'B', size.body, width) : 0);
     for (const skill of resume.skills) {
-      const prefix = `${skill.category}:`;
-      if (skill.text.startsWith(prefix)) labelled(prefix, skill.text.slice(prefix.length).trim());
-      else paragraph('P', skill.text, 'R', size.body, color.text);
+      const parts = skillParts(skill);
+      if (parts.label !== undefined) labelled(parts.label, parts.body);
+      else paragraph('P', parts.body, 'R', size.body, color.text);
     }
   }
   const plainSection = (label: string, lines: string[]): void => {
