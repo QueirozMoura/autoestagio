@@ -70,6 +70,26 @@ Só vale variante `aprovado` com data; rascunho e `rejeitado` nunca são escolhi
 - Aprovar variantes não aprova o modelo: `isModelFullyApproved` exige `approval` válido para o conteúdo
   atual e ao menos uma variante aprovada em cada bloco.
 
+## Resolução do currículo (Etapa 4.2, `src/cv/resolve.ts`)
+
+`resolveResume(model, { area?, extraction })` transforma o modelo **aprovado** em um currículo resolvido (estrutura
+intermediária para o futuro renderizador; **não gera PDF**) mais um manifesto de rastreabilidade.
+
+- **Exige** aprovação integral válida para o conteúdo atual (`STALE_APPROVAL` se mudou depois de aprovar) e
+  fidelidade ao PDF mestre (`FIDELITY_FAILED`). Falhas são controladas (`ResumeResolutionError`); `tryResolveResume`
+  devolve `{ ok: false, error }` em vez de lançar.
+- **Campos curados vencem os originais** (acessores `effective*`): título e tecnologias da entrada, skills, títulos de
+  seção. A **certificação usa só `curated.text`**; sem curadoria ela não entra (o PDF traz ano e descrição).
+- **Resumo e bullets** só de variantes aprovadas, pela seleção estrita por área (sem área → genérico; com área →
+  só a daquela área; sem variante → `MISSING_APPROVED_VARIANT`, sem fallback; Suporte e Dados seguem bloqueados).
+- **Links:** só os confirmados pelo proprietário (`confirmedByUser` + aprovado com data).
+- **Proibido:** rascunho, rejeitado, informação retida (ano e descrição da certificação) e frases de afirmações
+  rejeitadas (`bannedPhrases`) fazem a resolução falhar (`FORBIDDEN_CONTENT`) se aparecerem.
+- **Manifesto** (sem datas nem texto pessoal): hash do modelo, área, ids das variantes usadas, origem e bases dos
+  campos curados, links incluídos/omitidos e `contentSha256` do conteúdo resolvido. A mesma entrada gera sempre a
+  mesma saída.
+- Entradas sem nenhum bullet aprovado para a área são omitidas e registradas no manifesto.
+
 ## Relatório de fidelidade
 
 Compara o modelo com o PDF por métodos independentes da leitura estrutural:
