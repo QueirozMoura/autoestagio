@@ -175,3 +175,40 @@ candidatura**: `approve` → `authorize` → `send`.
 5. A verificação de "página oficial" depende do domínio que **você** informa; o programa confere que a página e o
    endereço pertencem a ele, mas não prova sozinho que o domínio é da empresa.
 6. O envio só foi exercitado contra um Gmail simulado. Nenhum e-mail real foi enviado.
+
+## Anexo personalizado e rascunho local `.eml` (Etapa 4.5c)
+
+**Nada disto envia e-mail.** `EMAIL_SEND_ENABLED` continua `false` e o transporte do Gmail não foi alterado.
+
+### Qual currículo é anexado
+
+| Situação da candidatura                              | Anexo                                                                                        |
+| ---------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| Nunca teve vínculo de currículo (candidatura antiga) | Currículo mestre aprovado, como antes (nada é regenerado)                                    |
+| Vínculo **aprovado** (`cv attachment approve`)       | PDF personalizado: é a fonte **obrigatória**; regenerado e validado em memória, com a âncora |
+| Só histórico: em preparação, revogado ou substituído | **Bloqueio.** Nunca há fallback para o mestre; aprove um vínculo ou resolva explicitamente   |
+
+Com vínculo aprovado, `email approve`, `dry-run`, `authorize`, `send` e `export-eml` precisam de
+`--ancora-sha256 <hash>` (o SHA-256 do arquivo de âncora, informado por você). O PDF é regenerado pelo
+fluxo estrito e só os bytes validados são usados; o arquivo em `data/cv-output/` não é lido. Se o hash do
+PDF, a variante, o modelo editorial, a vaga ou o vínculo divergirem do registrado, o envio é bloqueado e nenhum
+registro é atualizado. As verificações anteriores continuam (inclusive a do currículo mestre aprovado).
+
+### Autorizações
+
+O `bindingHash` da autorização passa a incluir o vínculo (id, variante, SHA-256 do PDF e hash do modelo)
+quando há anexo personalizado. Para candidaturas sem vínculo o formato é exatamente o anterior. Criar,
+aprovar, revogar ou substituir um vínculo vence na hora as autorizações **ainda não usadas** da candidatura
+(gatilho do banco), e mesmo uma autorização reaberta à força não passa: o hash de vinculação deixa de conferir.
+
+### Exportar um rascunho local
+
+```
+email export-eml <id> [--test] [--ancora-sha256 <hash>] [--output <diretório>]
+```
+
+Exige as mesmas verificações do envio (rascunho revisado, destinatário verificado, anexo correto e íntegro) e que
+a candidatura esteja **aprovada para envio (`email approve`) — também com `--test`** —, exceto a trava mestra. Grava `candidatura-<id>-<real|teste>-<AAAAMMDD>-<sha8>.eml`
+em `data/eml-drafts/` (padrão; 0700; arquivo 0600; nunca sobrescreve), com a mesma escrita privada de `cv generate`.
+O MIME é validado antes de gravar (destinatário, corpo, anexo e fronteira). Não muda o estado da candidatura e só
+registra um evento. O `dry-run` comum nunca cria `.eml`. O arquivo contém dados pessoais: mantenha-o privado.

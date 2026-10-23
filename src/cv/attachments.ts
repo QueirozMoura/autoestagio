@@ -319,3 +319,84 @@ export function revokeAttachment(db: Db, options: Decision): AttachmentView {
       .immediate(),
   );
 }
+
+// ------------------------------------------------------------------ resolução do anexo
+
+/** Vínculo aprovado (única fonte do anexo quando existe). Dados do artefato registrado, não prova de integridade. */
+export interface ApprovedLinkRef {
+  id: number;
+  applicationId: number;
+  jobId: number;
+  artifactId: number;
+  variant: string;
+  pdfSha256: string;
+  pdfBytes: number;
+  modelHash: string;
+  fileName: string;
+}
+
+/**
+ * Qual currículo uma candidatura deve anexar, segundo o BANCO:
+ *  - `mestre`: nenhum vínculo jamais existiu (candidatura antiga) → currículo mestre aprovado;
+ *  - `aprovado`: há vínculo aprovado → ele é a fonte obrigatória do anexo;
+ *  - `bloqueado`: há histórico de vínculo, mas nenhum aprovado e utilizável (em preparação, revogado
+ *    ou substituído) → nunca há fallback para o mestre; exige resolução explícita.
+ */
+export type AttachmentClassification =
+  | { kind: 'mestre' }
+  | { kind: 'aprovado'; link: ApprovedLinkRef }
+  | { kind: 'bloqueado'; states: AttachmentState[] };
+
+export function classifyAttachment(db: Db, applicationId: number): AttachmentClassification {
+  const rows = db
+    .prepare(
+      `SELECT l.id, l.application_id, l.job_id, l.artifact_id, l.variant, l.state,
+              a.pdf_sha256, a.pdf_bytes, a.model_hash, a.file_name
+         FROM application_cv_attachments l JOIN cv_artifacts a ON a.id = l.artifact_id
+        WHERE l.application_id = ? ORDER BY l.id`,
+    )
+    .all(applicationId) as {
+    id: number;
+    application_id: number;
+    job_id: number;
+    artifact_id: number;
+    variant: string;
+    state: AttachmentState;
+    pdf_sha256: string;
+    pdf_bytes: number;
+    model_hash: string;
+    file_name: string;
+  }[];
+  if (rows.length === 0) return { kind: 'mestre' };
+  const approved = rows.find((row) => row.state === 'aprovado');
+  if (approved === undefined) return { kind: 'bloqueado', states: rows.map((row) => row.state) };
+  return {
+    kind: 'aprovado',
+    link: {
+      id: approved.id,
+      applicationId: approved.application_id,
+      jobId: approved.job_id,
+      artifactId: approved.artifact_id,
+      variant: approved.variant,
+      pdfSha256: approved.pdf_sha256,
+      pdfBytes: approved.pdf_bytes,
+      modelHash: approved.model_hash,
+      fileName: approved.file_name,
+    },
+  };
+}
+
+/**
+ * Anexo personalizado já resolvido: bytes gerados e validados EM MEMÓRIA pelo fluxo estrito agora.
+ * Quem consome (preflight) ainda confere tudo contra o banco e recalcula o SHA-256 dos bytes.
+ */
+export interface ResolvedAttachment {
+  applicationId: number;
+  jobId: number;
+  linkId: number;
+  variant: string;
+  pdfSha256: string;
+  modelHash: string;
+  fileName: string;
+  bytes: Buffer;
+}

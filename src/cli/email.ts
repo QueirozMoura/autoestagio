@@ -29,6 +29,7 @@ export function formatDryRun(
       `  destinatário: ${m.recipientMasked}`,
       `  assunto: ${m.subject}`,
       `  anexo: ${m.attachmentName} (${m.attachmentBytes} bytes, SHA-256 ${m.attachmentSha256Prefix}…)`,
+      `  origem do anexo: ${m.attachmentSource === 'personalizado' ? `currículo personalizado aprovado (${m.attachmentVariant ?? ''})` : 'currículo mestre aprovado'}`,
       `  tamanho total: ${m.mimeBytes} bytes`,
     );
   }

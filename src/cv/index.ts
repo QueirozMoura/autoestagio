@@ -141,12 +141,16 @@ export {
 export {
   AttachmentError,
   approveAttachment,
+  classifyAttachment,
   createAttachment,
   listAttachments,
   liveAttachment,
   registerArtifact,
   revokeAttachment,
+  type ApprovedLinkRef,
+  type AttachmentClassification,
   type AttachmentErrorCode,
   type AttachmentView,
   type NewArtifact,
+  type ResolvedAttachment,
 } from './attachments.js';

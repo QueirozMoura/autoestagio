@@ -3,6 +3,8 @@ import type { Db } from '../db/index.js';
 import { classifyJobAreas } from '../eligibility/areas.js';
 import {
   AttachmentError,
+  classifyAttachment,
+  type ResolvedAttachment,
   approveAttachment,
   createAttachment,
   liveAttachment,
@@ -82,6 +84,8 @@ export interface StrictArtifact {
   pages: number;
   modelHash: string;
   variant: string;
+  /** Os bytes efetivamente validados (mesma cópia atestada pelo fluxo estrito). */
+  bytes: Buffer;
 }
 
 /** Geração estrita EM MEMÓRIA: nenhum arquivo em disco é lido como PDF nem gravado. */
@@ -129,6 +133,7 @@ export async function regenerateStrict(
       pages: artifact.pages,
       modelHash: model,
       variant: variantId,
+      bytes,
     },
   };
 }
@@ -343,4 +348,68 @@ export function formatAttachmentList(
         `  #${v.id} ${v.variant} PDF ${v.pdfSha8} modelo ${v.modelHash8} ${v.pages} pág. — ${STATE_LABEL[v.state] ?? v.state}`,
     ),
   ].join('\n');
+}
+
+export type ResolveOutcome =
+  { ok: true; attachment: ResolvedAttachment | undefined } | AttachFailure;
+
+/**
+ * Função central que resolve o currículo a anexar (sem tocar em Gmail nem em disco):
+ *  - candidatura antiga sem vínculo → `attachment: undefined` (usa o mestre, como antes);
+ *  - vínculo aprovado → regenera em memória pelo fluxo estrito e exige variante, modelo e SHA-256
+ *    completo idênticos aos registrados; usa SÓ os bytes validados; divergência bloqueia e NADA é atualizado;
+ *  - histórico sem vínculo aprovado → bloqueio explícito (sem fallback para o mestre).
+ */
+export async function resolveApprovedAttachment(
+  request: { db: Db; applicationId: number; inputs: StrictInputsOptions },
+  deps: AttachDeps = {},
+): Promise<ResolveOutcome> {
+  const application = getApplication(request.db, request.applicationId);
+  if (application === undefined)
+    return fail('candidatura', 'APPLICATION_NOT_FOUND', 'Candidatura inexistente.');
+  const classification = classifyAttachment(request.db, request.applicationId);
+  if (classification.kind === 'mestre') return { ok: true, attachment: undefined };
+  if (classification.kind === 'bloqueado')
+    return fail(
+      'registro',
+      'NO_APPROVED_LINK_USABLE',
+      'A candidatura tem histórico de vínculo de currículo, mas nenhum vínculo aprovado e utilizável (em preparação, revogado ou substituído). O currículo mestre NÃO será usado como substituto: aprove um vínculo (cv attachment approve) ou resolva explicitamente.',
+    );
+  const { link } = classification;
+  if (link.jobId !== application.jobId)
+    return fail('candidatura', 'JOB_MISMATCH', 'O vínculo não pertence à vaga da candidatura.');
+  const strict = await regenerateStrict(request.inputs, link.variant, deps);
+  if (!strict.ok) return strict;
+  const { artifact } = strict;
+  if (artifact.variant !== link.variant)
+    return fail(
+      'validacao',
+      'VARIANT_MISMATCH',
+      'Variante regenerada difere da vinculada. Nada foi atualizado.',
+    );
+  if (artifact.modelHash !== link.modelHash)
+    return fail(
+      'validacao',
+      'MODEL_DIVERGENT',
+      'O modelo editorial aprovado mudou desde o registro do artefato. Nada foi atualizado; crie e aprove um novo vínculo.',
+    );
+  if (artifact.pdfSha256 !== link.pdfSha256 || sha256(artifact.bytes) !== link.pdfSha256)
+    return fail(
+      'validacao',
+      'ARTIFACT_HASH_DIVERGENT',
+      'O PDF regenerado difere do artefato aprovado. Nada foi atualizado nem anexado.',
+    );
+  return {
+    ok: true,
+    attachment: {
+      applicationId: request.applicationId,
+      jobId: application.jobId,
+      linkId: link.id,
+      variant: link.variant,
+      pdfSha256: link.pdfSha256,
+      modelHash: link.modelHash,
+      fileName: link.fileName,
+      bytes: Buffer.from(artifact.bytes),
+    },
+  };
 }

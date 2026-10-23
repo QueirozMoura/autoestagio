@@ -17,10 +17,10 @@ import {
 } from '../cv/index.js';
 import { CV_VARIANTS, inspectVariants } from '../cv/strict-inputs.js';
 import { createHttpClient, loadSourcesConfig } from '../sources/index.js';
+import { strictInputsOptions } from './strict-options.js';
 import { registerCvAttachCommands } from './cv-attach-commands.js';
 import { formatGenerate, generateJson, generateResume } from './cv-generate.js';
 import { formatVariants, variantsJson } from './cv-variants.js';
-import type { StrictInputsOptions } from '../cv/strict-inputs.js';
 
 /** Caminho do PDF mestre: --pdf, ou o currículo registrado na aprovação do perfil. */
 function masterPdfPath(option: string | undefined): string {
@@ -35,18 +35,6 @@ function masterPdfPath(option: string | undefined): string {
 function poppler(pdf: string): { extractor: string; text: string } | undefined {
   const run = spawnSync('pdftotext', ['-enc', 'UTF-8', pdf, '-'], { encoding: 'utf8' });
   return run.status === 0 ? { extractor: 'poppler (pdftotext)', text: run.stdout } : undefined;
-}
-
-/** Opções do carregador estrito a partir da configuração real; a âncora vem sempre do operador. */
-function strictInputsOptions(anchorSha256: string | undefined): StrictInputsOptions {
-  const config = loadConfig();
-  const approval = loadProfile(config.profilePath)?.approval;
-  return {
-    modelPath: config.cvModelPath,
-    masterPdf:
-      approval === undefined ? undefined : { path: approval.cvFile, sha256: approval.cvSha256 },
-    anchorSha256,
-  };
 }
 
 export function registerCvCommands(program: Command): void {

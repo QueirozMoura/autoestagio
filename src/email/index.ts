@@ -60,3 +60,4 @@ export {
   type SendResult,
 } from './send.js';
 export { loadEmailConfig, type EmailConfig } from './config.js';
+export { exportEml, verifyMime, type EmlExportOptions, type EmlExportResult } from './eml.js';

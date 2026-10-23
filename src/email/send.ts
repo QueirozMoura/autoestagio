@@ -11,6 +11,7 @@ import {
 } from '../applications/index.js';
 import { alreadySentEquivalent } from '../applications/equivalence.js';
 import type { Profile } from '../config/index.js';
+import { classifyAttachment, type ResolvedAttachment } from '../cv/attachments.js';
 import type { Db } from '../db/index.js';
 import { profileHash as hashProfile } from '../eligibility/index.js';
 import { answerRequirement, computeReadiness, getDraftRecord } from '../preparation/index.js';
@@ -45,6 +46,12 @@ export interface EmailContext {
   testMailbox?: string | undefined;
   /** Lê o PDF aprovado AGORA. Os bytes lidos são os mesmos que seguem em anexo. */
   readCv?: () => Buffer;
+  /**
+   * Anexo personalizado já resolvido (geração estrita em memória; ver `resolveApprovedAttachment`).
+   * Obrigatório quando a candidatura tem vínculo de currículo aprovado; o preflight confere tudo
+   * contra o banco e recalcula o SHA-256 dos bytes. Sem vínculo, é ignorado.
+   */
+  attachment?: ResolvedAttachment | undefined;
   now?: () => Date;
 }
 
@@ -89,25 +96,46 @@ interface SendPlan {
   cvBytes: Buffer;
   cvSha256: string;
   cvName: string;
+  /** `mestre`: candidatura sem vínculo; `personalizado`: vínculo de currículo aprovado. */
+  attachmentSource: 'mestre' | 'personalizado';
+  attachmentVariant: string | null;
   bindingHash: string;
 }
 
-/** O que uma autorização cobre: este conteúdo, este currículo e este destinatário. Nada mais. */
+/**
+ * O que uma autorização cobre: este conteúdo, este currículo e este destinatário. Nada mais.
+ * Com anexo personalizado, a identidade do vínculo aprovado (id, variante, PDF e modelo) também entra:
+ * trocar ou revogar o vínculo invalida autorizações antigas. Sem `attachment` (currículo mestre) o
+ * formato é EXATAMENTE o anterior, então autorizações já emitidas para o mestre continuam coerentes.
+ */
 export function bindingHashOf(parts: {
   contentHash: string;
   cvSha256: string;
   recipient: string;
   kind: DispatchKind;
   applicationId: number;
+  attachment?: { linkId: number; variant: string; pdfSha256: string; modelHash: string };
 }): string {
+  const base = [
+    parts.applicationId,
+    parts.kind,
+    parts.contentHash,
+    parts.cvSha256,
+    parts.recipient,
+  ];
   return sha256(
-    JSON.stringify([
-      parts.applicationId,
-      parts.kind,
-      parts.contentHash,
-      parts.cvSha256,
-      parts.recipient,
-    ]),
+    JSON.stringify(
+      parts.attachment === undefined
+        ? base
+        : [
+            ...base,
+            'anexo-aprovado',
+            parts.attachment.linkId,
+            parts.attachment.variant,
+            parts.attachment.pdfSha256,
+            parts.attachment.modelHash,
+          ],
+    ),
   );
 }
 
@@ -165,6 +193,93 @@ export function preflight(ctx: EmailContext, applicationId: number, kind: Dispat
             ? 'o currículo passa do limite de 5 MB'
             : `SHA-256 ${cvSha.slice(0, 12)}… confere com a aprovação e com a candidatura`,
     );
+  }
+
+  // Anexo efetivo: mestre (candidatura sem vínculo) ou o vínculo APROVADO. Com histórico de vínculo
+  // sem aprovação utilizável, nunca há fallback para o mestre.
+  let attached:
+    | {
+        bytes: Buffer;
+        sha: string;
+        name: string;
+        source: 'mestre' | 'personalizado';
+        variant: string | null;
+        binding?: { linkId: number; variant: string; pdfSha256: string; modelHash: string };
+      }
+    | undefined;
+  const classification = classifyAttachment(db, applicationId);
+  if (classification.kind === 'mestre') {
+    if (cvBytes !== undefined)
+      attached = {
+        bytes: cvBytes,
+        sha: cvSha,
+        name: basename(profile.approval?.cvFile ?? application.cvLabel),
+        source: 'mestre',
+        variant: null,
+      };
+    add(
+      'anexo_selecionado',
+      true,
+      'currículo mestre aprovado (candidatura sem vínculo de currículo)',
+    );
+  } else if (classification.kind === 'bloqueado') {
+    add(
+      'vinculo_curriculo',
+      false,
+      `há histórico de vínculo de currículo sem vínculo aprovado utilizável (${[...new Set(classification.states)].join(', ')}); o currículo mestre NÃO é usado como substituto: resolva explicitamente`,
+    );
+  } else {
+    const link = classification.link;
+    const resolved = ctx.attachment;
+    const identity =
+      resolved !== undefined &&
+      resolved.applicationId === applicationId &&
+      link.applicationId === applicationId &&
+      resolved.jobId === application.jobId &&
+      link.jobId === application.jobId &&
+      resolved.linkId === link.id &&
+      resolved.variant === link.variant &&
+      resolved.modelHash === link.modelHash &&
+      resolved.pdfSha256 === link.pdfSha256 &&
+      resolved.fileName === link.fileName;
+    add(
+      'vinculo_curriculo',
+      identity,
+      resolved === undefined
+        ? 'há vínculo de currículo aprovado, mas o anexo não foi resolvido pela geração estrita (informe a âncora com --ancora-sha256)'
+        : identity
+          ? `vínculo #${link.id} aprovado (variante ${link.variant}) corresponde a esta candidatura, a esta vaga e ao modelo aprovado`
+          : 'o anexo resolvido não corresponde ao vínculo aprovado (candidatura, vaga, variante, modelo ou PDF): envio bloqueado',
+    );
+    if (resolved !== undefined && identity) {
+      const actual = sha256(resolved.bytes);
+      const intact =
+        actual === link.pdfSha256 &&
+        resolved.bytes.subarray(0, 5).toString('latin1') === '%PDF-' &&
+        resolved.bytes.length > 0 &&
+        resolved.bytes.length <= MAX_ATTACHMENT_BYTES;
+      add(
+        'anexo_integro',
+        intact,
+        intact
+          ? `SHA-256 ${actual.slice(0, 12)}… do anexo personalizado confere com o artefato aprovado`
+          : 'os bytes do anexo personalizado não conferem com o artefato aprovado (hash, formato ou limite de 5 MB)',
+      );
+      if (intact)
+        attached = {
+          bytes: resolved.bytes,
+          sha: actual,
+          name: link.fileName,
+          source: 'personalizado',
+          variant: link.variant,
+          binding: {
+            linkId: link.id,
+            variant: link.variant,
+            pdfSha256: link.pdfSha256,
+            modelHash: link.modelHash,
+          },
+        };
+    }
   }
 
   // Candidatura e rascunho.
@@ -283,7 +398,7 @@ export function preflight(ctx: EmailContext, applicationId: number, kind: Dispat
   const core = checks.filter((check) => check.sendOnly !== true).every((check) => check.ok);
 
   let plan: SendPlan | undefined;
-  if (core && draft !== undefined && cvBytes !== undefined && recipient !== undefined) {
+  if (core && draft !== undefined && attached !== undefined && recipient !== undefined) {
     const subject = kind === 'teste' ? `[TESTE AutoEstagio] ${draft.subject}` : draft.subject;
     const body =
       kind === 'teste'
@@ -297,15 +412,18 @@ export function preflight(ctx: EmailContext, applicationId: number, kind: Dispat
       subject,
       body,
       contentHash: draft.contentHash,
-      cvBytes,
-      cvSha256: cvSha,
-      cvName: basename(profile.approval?.cvFile ?? application.cvLabel),
+      cvBytes: attached.bytes,
+      cvSha256: attached.sha,
+      cvName: attached.name,
+      attachmentSource: attached.source,
+      attachmentVariant: attached.variant,
       bindingHash: bindingHashOf({
         contentHash: draft.contentHash,
-        cvSha256: cvSha,
+        cvSha256: attached.sha,
         recipient,
         kind,
         applicationId,
+        ...(attached.binding === undefined ? {} : { attachment: attached.binding }),
       }),
     };
   }
@@ -413,6 +531,9 @@ export interface DryRunReport {
     attachmentName: string;
     attachmentBytes: number;
     attachmentSha256Prefix: string;
+    /** `mestre` ou `personalizado` (vínculo aprovado). */
+    attachmentSource: 'mestre' | 'personalizado';
+    attachmentVariant: string | null;
     mimeBytes: number;
   };
 }
@@ -445,6 +566,8 @@ export function dryRunEmail(
       attachmentName: plan.cvName,
       attachmentBytes: plan.cvBytes.length,
       attachmentSha256Prefix: plan.cvSha256.slice(0, 12),
+      attachmentSource: plan.attachmentSource,
+      attachmentVariant: plan.attachmentVariant,
       mimeBytes: Buffer.byteLength(mime),
     };
   }

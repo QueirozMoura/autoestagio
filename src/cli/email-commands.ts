@@ -10,6 +10,7 @@ import {
   approveForSending,
   authorizeSend,
   dryRunEmail,
+  exportEml,
   extractEmails,
   isFreemail,
   listDispatches,
@@ -31,6 +32,9 @@ import {
   type MailTransport,
 } from '../email/index.js';
 import { createHttpClient, loadSourcesConfig } from '../sources/index.js';
+import { resolveFromRoot } from '../utils/paths.js';
+import { resolveApprovedAttachment } from './cv-attach.js';
+import { strictInputsOptions } from './strict-options.js';
 import { formatDispatches, formatDryRun } from './email.js';
 
 interface Deps {
@@ -72,6 +76,34 @@ function buildContext(db: Db, config: AppConfig, profile: Profile): EmailContext
     testMailbox: loadEmailConfig(config.emailConfigPath).testMailbox,
   };
 }
+
+/**
+ * Contexto de e-mail com o anexo resolvido. Candidatura sem vínculo usa o mestre (nada é regenerado);
+ * com vínculo aprovado, o PDF é regenerado e validado em memória (exige --ancora-sha256). Se a
+ * resolução falhar, o motivo é mostrado e o preflight bloqueia: nunca há fallback para o mestre.
+ */
+async function contextWithAttachment(
+  db: Db,
+  config: AppConfig,
+  applicationId: number,
+  anchorSha256: string | undefined,
+): Promise<EmailContext> {
+  const base = buildContext(db, config, loadApproved(config));
+  const resolved = await resolveApprovedAttachment({
+    db,
+    applicationId,
+    inputs: strictInputsOptions(anchorSha256),
+  });
+  if (!resolved.ok) {
+    console.error(`Anexo: ${resolved.message} (código ${resolved.code})`);
+    return base;
+  }
+  return { ...base, attachment: resolved.attachment };
+}
+
+const ANCHOR_OPTION = '--ancora-sha256 <hash>';
+const ANCHOR_HELP =
+  'SHA-256 do arquivo de âncora (necessário só se a candidatura tem vínculo de currículo aprovado)';
 
 function loadApproved(config: AppConfig): Profile {
   const profile = loadProfile(config.profilePath);
@@ -281,11 +313,12 @@ export function registerEmailCommands(
     .command('approve <id>')
     .description('Aprova ESTA candidatura para envio real (modo revisao); não envia nada')
     .requiredOption('--reason <motivo>', 'por que você aprova')
-    .action((id: string, options: { reason: string }) => {
+    .option(ANCHOR_OPTION, ANCHOR_HELP)
+    .action(async (id: string, options: { reason: string; ancoraSha256?: string }) => {
       const config = loadConfig();
-      const application = withDb((db) =>
+      const application = await withDbAsync(async (db) =>
         approveForSending(
-          buildContext(db, config, loadApproved(config)),
+          await contextWithAttachment(db, config, parseId(id), options.ancoraSha256),
           parseId(id),
           options.reason,
         ),
@@ -299,15 +332,66 @@ export function registerEmailCommands(
     .command('dry-run <id>')
     .description('Ensaio do envio: verificações + mensagem montada. NUNCA chama o Gmail (padrão)')
     .option('--test', 'ensaia o envio de teste para a sua caixa de teste')
-    .action((id: string, options: { test?: boolean }) => {
+    .option(ANCHOR_OPTION, ANCHOR_HELP)
+    .action(async (id: string, options: { test?: boolean; ancoraSha256?: string }) => {
       const config = loadConfig();
       const kind = kindOf(options.test);
-      const report = withDb((db) =>
-        dryRunEmail(buildContext(db, config, loadApproved(config)), parseId(id), kind),
+      const report = await withDbAsync(async (db) =>
+        dryRunEmail(
+          await contextWithAttachment(db, config, parseId(id), options.ancoraSha256),
+          parseId(id),
+          kind,
+        ),
       );
       console.log(formatDryRun(report, parseId(id), kind));
       if (!report.ok) process.exitCode = 1;
     });
+
+  email
+    .command('export-eml <id>')
+    .description(
+      'Exporta um rascunho LOCAL (.eml) com o anexo correto. NÃO envia, não chama o Gmail e não muda o estado',
+    )
+    .option('--test', 'exporta a versão de teste (destinatário = sua caixa de teste)')
+    .option(
+      '--output <diretorio>',
+      'diretório de saída (padrão: data/eml-drafts/, criado com 0700); o nome do arquivo é definido pelo programa',
+    )
+    .option(ANCHOR_OPTION, ANCHOR_HELP)
+    .action(
+      async (id: string, options: { test?: boolean; output?: string; ancoraSha256?: string }) => {
+        const config = loadConfig();
+        const kind = kindOf(options.test);
+        const dir =
+          options.output === undefined ? resolveFromRoot('data/eml-drafts') : options.output;
+        const result = await withDbAsync(async (db) =>
+          exportEml(
+            await contextWithAttachment(db, config, parseId(id), options.ancoraSha256),
+            parseId(id),
+            kind,
+            { dir },
+          ),
+        );
+        console.log(
+          [
+            `Rascunho local exportado — candidatura #${id} (${kind === 'real' ? 'envio real' : 'TESTE'}).`,
+            '  NADA FOI ENVIADO. Nenhuma chamada ao Gmail foi feita; o estado da candidatura não mudou.',
+            `  Arquivo: ${result.path}`,
+            `  Destinatário: ${result.recipientMasked}`,
+            `  Anexo: ${result.attachmentSource === 'personalizado' ? `currículo personalizado (${result.attachmentVariant ?? ''})` : 'currículo mestre'}`,
+            result.durable
+              ? '  Durabilidade: confirmada'
+              : '  Durabilidade: NÃO confirmada (arquivo publicado; fsync do diretório falhou)',
+            ...(result.tempCleanup === 'left-behind'
+              ? [
+                  `  Aviso: sobrou um temporário no diretório (${result.leftoverTemp ?? ''}); remova-o.`,
+                ]
+              : []),
+            '  O arquivo contém dados pessoais: mantenha-o privado.',
+          ].join('\n'),
+        );
+      },
+    );
 
   email
     .command('authorize <id>')
@@ -320,54 +404,66 @@ export function registerEmailCommands(
     )
     .option('--test', 'autoriza o envio de TESTE para a sua caixa')
     .option('--ttl-min <min>', 'validade em minutos (1 a 240)', '30')
-    .action((id: string, options: { reason: string; test?: boolean; ttlMin: string }) => {
-      const config = loadConfig();
-      const authorization = withDb((db) =>
-        authorizeSend(
-          buildContext(db, config, loadApproved(config)),
-          parseId(id),
-          kindOf(options.test),
-          options.reason,
-          Number(options.ttlMin),
-        ),
-      );
-      console.log(
-        `Autorização #${authorization.id} criada (${authorization.kind}); vale até ${authorization.expiresAt} e para 1 envio.\n` +
-          `Para enviar: email send ${id} --authorization ${authorization.id}${authorization.kind === 'teste' ? ' --test' : ''}`,
-      );
-    });
+    .option(ANCHOR_OPTION, ANCHOR_HELP)
+    .action(
+      async (
+        id: string,
+        options: { reason: string; test?: boolean; ttlMin: string; ancoraSha256?: string },
+      ) => {
+        const config = loadConfig();
+        const authorization = await withDbAsync(async (db) =>
+          authorizeSend(
+            await contextWithAttachment(db, config, parseId(id), options.ancoraSha256),
+            parseId(id),
+            kindOf(options.test),
+            options.reason,
+            Number(options.ttlMin),
+          ),
+        );
+        console.log(
+          `Autorização #${authorization.id} criada (${authorization.kind}); vale até ${authorization.expiresAt} e para 1 envio.\n` +
+            `Para enviar: email send ${id} --authorization ${authorization.id}${authorization.kind === 'teste' ? ' --test' : ''}`,
+        );
+      },
+    );
 
   email
     .command('send <id>')
     .description('ENVIA a mensagem (exige EMAIL_SEND_ENABLED=true e uma autorização válida)')
     .requiredOption('--authorization <n>', 'número da autorização criada por "email authorize"')
     .option('--test', 'envio de TESTE para a sua caixa (não altera o estado da candidatura)')
-    .action(async (id: string, options: { authorization: string; test?: boolean }) => {
-      const config = loadConfig();
-      const result = await withDbAsync((db) =>
-        sendEmail(
-          buildContext(db, config, loadApproved(config)),
-          parseId(id),
-          parseId(options.authorization),
-          kindOf(options.test),
-        ),
-      );
-      if (result.outcome === 'aceito') {
-        console.log(
-          `Aceito pelo Gmail (envio #${result.dispatchId}, id registrado). Isto NÃO confirma entrega nem recebimento pela empresa.`,
+    .option(ANCHOR_OPTION, ANCHOR_HELP)
+    .action(
+      async (
+        id: string,
+        options: { authorization: string; test?: boolean; ancoraSha256?: string },
+      ) => {
+        const config = loadConfig();
+        const result = await withDbAsync(async (db) =>
+          sendEmail(
+            await contextWithAttachment(db, config, parseId(id), options.ancoraSha256),
+            parseId(id),
+            parseId(options.authorization),
+            kindOf(options.test),
+          ),
         );
-      } else if (result.outcome === 'rejeitado') {
-        console.log(
-          `O Gmail recusou o envio (${result.category}); nada foi enviado. Candidatura marcada como "falhou".`,
-        );
-        process.exitCode = 1;
-      } else {
-        console.log(
-          `RESULTADO DESCONHECIDO (${result.category}). NÃO REENVIE. Confira a pasta Enviados do Gmail e resolva com "email resolve ${id}".`,
-        );
-        process.exitCode = 2;
-      }
-    });
+        if (result.outcome === 'aceito') {
+          console.log(
+            `Aceito pelo Gmail (envio #${result.dispatchId}, id registrado). Isto NÃO confirma entrega nem recebimento pela empresa.`,
+          );
+        } else if (result.outcome === 'rejeitado') {
+          console.log(
+            `O Gmail recusou o envio (${result.category}); nada foi enviado. Candidatura marcada como "falhou".`,
+          );
+          process.exitCode = 1;
+        } else {
+          console.log(
+            `RESULTADO DESCONHECIDO (${result.category}). NÃO REENVIE. Confira a pasta Enviados do Gmail e resolva com "email resolve ${id}".`,
+          );
+          process.exitCode = 2;
+        }
+      },
+    );
 
   email
     .command('status <id>')
