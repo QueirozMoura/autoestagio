@@ -2,7 +2,7 @@ import { spawnSync } from 'node:child_process';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import PDFDocument from 'pdfkit';
-import { beforeAll, describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it, vi } from 'vitest';
 import {
   NORMALIZATION_RULES,
   expectedContent,
@@ -25,6 +25,9 @@ import { PROJECT_ROOT } from '../../src/utils/paths.js';
 import { approvedModel } from '../helpers/cv-approved.js';
 import { loadFictional, type Loaded } from '../helpers/cv-fixture.js';
 import { fictionalResume } from '../helpers/cv-resume.js';
+
+// Renderizar e validar PDFs (pdfjs, Poppler) é mais lento com a suíte inteira rodando em paralelo.
+vi.setConfig({ testTimeout: 30_000 });
 
 const hasPoppler = spawnSync('pdftotext', ['-v']).status === 0;
 
@@ -116,19 +119,23 @@ describe('normalização: só diferenças de extração justificadas', () => {
 });
 
 describe('H1 a H4: PDFs válidos', () => {
-  it('uma página: os quatro passam; o relatório não finge ser a validação completa', async () => {
+  it('uma página: todas as verificações implementadas passam; o relatório não finge ser a validação completa', async () => {
     const resume = fictionalResume();
     const result = await renderResume(resume);
     const report = await validateRenderedPdf(result.bytes, resume, { poppler: 'off' });
     expect(report.ok).toBe(true);
     expect(report.complete).toBe(false);
-    expect(report.implemented).toEqual(['H1', 'H2', 'H3', 'H4']);
-    expect(report.pending).toEqual(['H5', 'H6', 'H7', 'H8', 'H9', 'H10']);
+    expect(report.implemented).toEqual(['H1', 'H2', 'H3', 'H4', 'H5', 'H8', 'H9']);
+    expect(report.pending).toEqual(['H6', 'H7', 'H10']);
+    expect(report.forbiddenProvided).toBe(false);
     expect(report.checks.map((c) => [c.id, c.status])).toEqual([
       ['H1', 'pass'],
       ['H2', 'pass'],
       ['H3', 'pass'],
       ['H4', 'pass'],
+      ['H5', 'pass'],
+      ['H8', 'pass'],
+      ['H9', 'pass'],
     ]);
     expect(report.pages).toBe(1);
     expect(report.pdfSha256).toBe(result.pdfSha256);
@@ -214,7 +221,8 @@ describe('H1: integridade e páginas (negativos)', () => {
     expect(report.ok).toBe(false);
     expect(check(report, 'H1').status).toBe('fail');
     expect(check(report, 'H1').details.join(' ')).toMatch(/%PDF-/);
-    for (const id of ['H2', 'H3', 'H4'] as const) expect(check(report, id).status).toBe('skipped');
+    for (const id of ['H2', 'H3', 'H4', 'H5', 'H8', 'H9'] as const)
+      expect(check(report, id).status).toBe('skipped');
     expect(report.pages).toBeNull();
     expect(report.extractors[0]?.status).toBe('error');
   });
@@ -545,6 +553,7 @@ describe('o validador é independente e só trabalha em memória', () => {
     const allowed = new Set([
       'node:crypto',
       'node:child_process',
+      'node:zlib',
       '../pdf.js',
       '../render/content.js',
       '../render/layout.js',

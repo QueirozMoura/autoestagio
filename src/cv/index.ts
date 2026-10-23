@@ -86,14 +86,17 @@ export {
 } from './render/index.js';
 export {
   NORMALIZATION_RULES,
+  NO_FORBIDDEN,
   expectedContent,
   validateRenderedPdf,
   type CheckId,
   type CheckResult,
   type Expected,
   type ExtractorInfo,
+  type ForbiddenSet,
   type PopplerMode,
   type PopplerRunner,
+  type RetainedItem,
   type ValidateOptions,
   type ValidationReport,
 } from './validate/index.js';

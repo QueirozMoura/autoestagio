@@ -8,6 +8,7 @@ import {
   skillParts,
   technologiesLabel,
   technologiesText,
+  tidyResume,
 } from './content.js';
 import { FontLoadError, loadFonts, type FontSet } from './fonts.js';
 import {
@@ -458,9 +459,10 @@ async function renderPass(
  * O texto nunca muda: só tipografia e espaçamento.
  */
 export async function renderResume(
-  resume: ResolvedResume,
+  input: ResolvedResume,
   options: RenderOptions = {},
 ): Promise<RenderResult> {
+  const resume = tidyResume(input);
   const layout = mergeLayout(options.layout);
   const problems = layoutProblems(layout);
   if (problems.length > 0) throw new RenderError('INVALID_LAYOUT', 'Layout inválido.', problems);

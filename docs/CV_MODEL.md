@@ -133,6 +133,33 @@ apenas "H1 a H4 passaram".
 - **Sem duplicação frágil:** o texto esperado vem de `render/content.ts` (`describeContent`), o mesmo módulo que o
   renderizador usa para compor títulos, rótulos e linhas de links.
 
+### Entrega 2a: H5, H8 e H9 (+ leitor estrutural `pdf-objects.ts`)
+
+`implemented` passa a ser H1–H5, H8, H9 e `pending` fica H6, H7 e H10 (`complete` continua `false`).
+
+- **`pdf-objects.ts`:** leitor estrutural mínimo, **só para PDFs do nosso PDFKit** (tabela de referências clássica).
+  Limites defensivos (arquivo 8 MiB, 10 000 objetos, profundidade 16, tokens por objeto, fluxo descomprimido 4 MiB).
+  Falha fechada com `PdfStructureError`: `/Encrypt`, `/Prev`, `ObjStm`/`XRef`, dados depois do `%%EOF`, segundo
+  `startxref`, `startxref` errado, chave ou objeto duplicado, string/dicionário/fluxo não fechados. A falha vira
+  reprovação de H8 e H9 (nunca "não consegui ver, então passou").
+- **H5:** `forbidden?: ForbiddenSet` (frases rejeitadas, URLs não confirmadas, informações retidas com **contexto**).
+  Frases e contextos casam com fronteira de palavra; item curto demais ("2026", "IA") é **recusado** em vez de banir o
+  termo isolado; URL é comparada **inteira** (um perfil não bloqueia os repositórios sob ele); detecta `undefined`,
+  `null`, `NaN`, `Infinity`, `[object Object]`, `{{ }}`, `${ }`, "lorem ipsum" (com `allowTokens` para exceções).
+  Sem `ForbiddenSet`, o relatório diz que só o texto inválido foi verificado (`forbiddenProvided: false`).
+- **H8:** Info e XMP campo a campo (sem chaves ou propriedades a mais; XMP sem DOCTYPE/ENTITY e só os espaços de
+  nomes esperados), datas fixas, `/Lang`, `MarkInfo`, `StructTreeRoot`, `DisplayDocTitle`, `/ID` íntegro e o pdfjs
+  concordando com a estrutura. Caminhos locais (Unix, Windows, UNC, `file://`, `~/`, `node_modules`), marcadores do
+  ambiente (`PDFKit`, `Node.js`) e `localMarkers` do chamador são procurados **nos metadados**, não no conteúdo nem nos
+  endereços dos links; os valores esperados (nome, título…) saem da varredura.
+- **H9:** A4 e `MediaBox`/`CropBox`/rotação/caixas extras, texto dentro das margens, fonte ≥ 8 pt, texto sobreposto,
+  título órfão e áreas clicáveis (dentro das margens, tamanho razoável, sem sobreposição e com texto por baixo).
+  Tolerâncias em `GEOMETRY` (2 pt nas margens, 0,1 pt no formato…), cada uma com o motivo no código.
+- **Renderizador:** `tidyResume` normaliza espaços em branco antes de desenhar (o PDFKit cola as palavras quando recebe
+  3 ou mais espaços seguidos). Texto bem formado não muda.
+- **Limitação:** texto TOTALMENTE fora da página não aparece nos extratores (pdfjs e Poppler o descartam); detectá-lo
+  exige ler os operadores do fluxo de conteúdo, candidato a uma verificação futura.
+
 ## Relatório de fidelidade
 
 Compara o modelo com o PDF por métodos independentes da leitura estrutural:

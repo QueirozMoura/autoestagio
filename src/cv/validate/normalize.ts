@@ -36,6 +36,20 @@ export function squash(text: string): string {
     .replace(/[\s|•]+/gu, '');
 }
 
+/** Remove caracteres invisíveis (hífen suave, espaços de largura zero, BOM). */
+export const stripInvisible = (text: string): string => text.replace(INVISIBLE, '');
+
+/**
+ * Texto "de leitura" para procurar frases: NFC, sem invisíveis, `|` e `•` viram espaço, espaços colapsados e
+ * minúsculas. Mantém as FRONTEIRAS DE PALAVRA (diferente de `squash`), para frases não casarem no meio de outra.
+ */
+export const plainText = (text: string): string =>
+  stripInvisible(text.normalize('NFC'))
+    .replace(/[|•]/gu, ' ')
+    .replace(/\s+/gu, ' ')
+    .trim()
+    .toLowerCase();
+
 /** O caractere é ignorado por `squash` (espaço, quebra, separador estrutural ou invisível)? */
 export const isIgnorableChar = (char: string): boolean =>
   /[\s|•]/u.test(char) || new RegExp(INVISIBLE.source, 'u').test(char);

@@ -10,6 +10,29 @@ import type { LayoutConfig } from './layout.js';
  */
 export type Labels = LayoutConfig['labels'];
 
+/**
+ * Espaços em branco normalizados: toda sequência vira UM espaço e as pontas são cortadas. O PDFKit cola as
+ * palavras quando recebe 3 ou mais espaços seguidos ("A   B" sai como "AB"), o que estragaria a leitura e a
+ * extração. Texto bem formado não muda; só espaços sobrando.
+ */
+export const tidyText = (text: string): string => text.replace(/\s+/gu, ' ').trim();
+
+const TIDY_SKIP = new Set(['manifest', 'url', 'id', 'kind', 'language', 'area']);
+
+function tidyValue<T>(value: T, key?: string): T {
+  if (typeof value === 'string')
+    return (key !== undefined && TIDY_SKIP.has(key) ? value : tidyText(value)) as T;
+  if (Array.isArray(value)) return value.map((item: unknown) => tidyValue(item, key)) as T;
+  if (typeof value === 'object' && value !== null)
+    return Object.fromEntries(
+      Object.entries(value).map(([k, v]) => [k, k === 'manifest' ? v : tidyValue(v, k)]),
+    ) as T;
+  return value;
+}
+
+/** Cópia do currículo resolvido com os espaços normalizados (a entrada original não é alterada). */
+export const tidyResume = (resume: ResolvedResume): ResolvedResume => tidyValue(resume);
+
 /** Título de seção como aparece no PDF. */
 export const headingText = (label: string): string => label.toLocaleUpperCase('pt-BR');
 

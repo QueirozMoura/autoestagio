@@ -3,7 +3,7 @@ import type { ExtractedPdf, LinkAnnotation, TextRun } from './extract.js';
 import { dropLineEndHyphens, firstDifference, isIgnorableChar, squash } from './normalize.js';
 import type { PopplerMode, PopplerText } from './poppler.js';
 
-export type CheckId = 'H1' | 'H2' | 'H3' | 'H4';
+export type CheckId = 'H1' | 'H2' | 'H3' | 'H4' | 'H5' | 'H6' | 'H7' | 'H8' | 'H9' | 'H10';
 
 export interface CheckResult {
   id: CheckId;
@@ -15,7 +15,7 @@ export interface CheckResult {
   details: string[];
 }
 
-const result = (
+export const result = (
   id: CheckId,
   name: string,
   problems: string[],
@@ -39,7 +39,7 @@ export const skipped = (id: CheckId, name: string, why: string): CheckResult => 
   details: [],
 });
 
-const clip = (text: string, max = 60): string =>
+export const clip = (text: string, max = 60): string =>
   text.length > max ? `${text.slice(0, max)}…` : text;
 
 // ------------------------------------------------------------------ H1: integridade e páginas

@@ -35,6 +35,12 @@ export interface ExtractedPdf {
   annotations: LinkAnnotation[];
   /** Quantidade de trechos de texto por página (página sem texto = página em branco). */
   runsPerPage: number[];
+  /** Linhas na ordem geométrica, com a página de cada uma. */
+  pageLines: { page: number; text: string }[];
+  /** Caixa visível, rotação e unidade de cada página, como o pdfjs as vê. */
+  pageViews: { view: [number, number, number, number]; rotate: number; userUnit: number }[];
+  /** Dicionário Info decodificado pelo pdfjs (só valores de texto). */
+  info: Record<string, string>;
 }
 
 export class PdfReadError extends Error {
@@ -80,9 +86,19 @@ export async function extractForValidation(bytes: Uint8Array): Promise<Extracted
   const runs: TextRun[] = [];
   const annotations: LinkAnnotation[] = [];
   const runsPerPage: number[] = [];
+  const pageViews: ExtractedPdf['pageViews'] = [];
+  let info: Record<string, string>;
   try {
+    const metadata = await doc.getMetadata();
+    info = Object.fromEntries(
+      Object.entries(metadata.info as unknown as Record<string, unknown>).filter(
+        (entry): entry is [string, string] => typeof entry[1] === 'string',
+      ),
+    );
     for (let pageNumber = 1; pageNumber <= doc.numPages; pageNumber++) {
       const page = await doc.getPage(pageNumber);
+      const [vx1 = 0, vy1 = 0, vx2 = 0, vy2 = 0] = page.view;
+      pageViews.push({ view: [vx1, vy1, vx2, vy2], rotate: page.rotate, userUnit: page.userUnit });
       const content = await page.getTextContent();
       let count = 0;
       for (const raw of content.items as unknown[]) {
@@ -114,14 +130,18 @@ export async function extractForValidation(bytes: Uint8Array): Promise<Extracted
     throw new PdfReadError(error);
   }
 
+  const pageLines = geometryLines(runs);
   return {
     pages: doc.numPages,
     extractor: { name: 'pdfjs-dist', version: pdfjs.version },
     runs,
     streamText: streamLines(runs).join('\n'),
-    geometryText: geometryLines(runs).join('\n'),
+    geometryText: pageLines.map((l) => l.text).join('\n'),
     annotations,
     runsPerPage,
+    pageLines,
+    pageViews,
+    info,
   };
 }
 
@@ -145,8 +165,8 @@ function streamLines(runs: TextRun[]): string[] {
 }
 
 /** Linhas na ordem geométrica: por página, de cima para baixo e, na linha, da esquerda para a direita. */
-function geometryLines(runs: TextRun[]): string[] {
-  const out: string[] = [];
+function geometryLines(runs: TextRun[]): { page: number; text: string }[] {
+  const out: { page: number; text: string }[] = [];
   const pages = [...new Set(runs.map((r) => r.page))].sort((a, b) => a - b);
   for (const page of pages) {
     const groups: { y: number; runs: TextRun[] }[] = [];
@@ -157,12 +177,13 @@ function geometryLines(runs: TextRun[]): string[] {
     }
     groups.sort((a, b) => b.y - a.y);
     for (const group of groups)
-      out.push(
-        group.runs
+      out.push({
+        page,
+        text: group.runs
           .sort((a, b) => a.x - b.x)
           .map((r) => r.text)
           .join(''),
-      );
+      });
   }
   return out;
 }

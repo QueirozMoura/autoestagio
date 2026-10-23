@@ -7,6 +7,8 @@ export {
   skillParts,
   technologiesLabel,
   technologiesText,
+  tidyResume,
+  tidyText,
   type BlockKind,
   type ContentBlock,
   type Labels,
