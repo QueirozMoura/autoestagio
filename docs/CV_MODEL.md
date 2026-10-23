@@ -265,6 +265,61 @@ integração 2c permanece pendente. Referências continuam opcionais nesta API; 
   identidade **relativa aos bytes de referência confiáveis fornecidos pelo chamador**, não autentica a procedência
   desses bytes e não equivale a concluir a validação integrada 2c ou a garantir aceitação por um ATS.
 
+### Entrega 2c: integração estrita em memória
+
+`renderAndValidateResume({ model, masterPdf, declarations, decisionContext?, referenceFonts, localContext, area? })`
+fica em `src/cv/strict.ts`, fora do renderizador e do núcleo do validador. Não recebe PDF candidato, `ForbiddenSet`,
+hash esperado, executor Poppler ou flag de aprovação do chamador. Não lê arquivos, não consulta banco, não envia
+requisições e não grava PDFs. O mestre chega como bytes: a integração calcula seu hash e o extrai novamente, em
+vez de aceitar uma extração supostamente verificada. Aprovações nunca são criadas ou alteradas.
+
+- **Âncora das fontes:** `font-policy.ts` contém SHA-256 literais da Lato Regular e Bold versionadas. Ambas são
+  obrigatórias; variante extra, repetida, trocada, ausente ou com qualquer byte diferente é recusada antes da
+  interpretação. Não existe override por configuração ou ambiente. O renderizador aceita bytes explicitamente
+  fornecidos e os copia antes de suspender a execução; o fluxo estrito entrega somente cópias autenticadas.
+- **Contexto:** o modelo precisa satisfazer o esquema e a aprovação vigente; a resolução reconfere fidelidade e
+  seleção estrita da área. O conjunto proibido é derivado internamente de claims rejeitadas, variantes não
+  aprovadas, links sem confirmação válida e campos retidos das certificações. Ano retido usa contextos completos,
+  não um número banido globalmente. Descrição ou frase sem contexto suficiente bloqueia a integração. Contexto
+  local exige raiz absoluta do projeto, nome do usuário e host, usados como marcadores no H8.
+- **Declarações e decisões:** chegam como dados, com identificadores únicos. `decision-context.ts` confere
+  decisões atômicas e dependências do conteúdo efetivamente resolvido. O booleano legado `aprovada` não
+  substitui uma decisão. Fontes históricas precisam corresponder exatamente ao registro e trecho revisados;
+  reconhecimento técnico não cria confirmação factual nova. As confirmações novas exigem igualdade do texto
+  e escopo com a fonte explícita. Limites declaratórios são fixos por tipo de afirmação. Aprovação global,
+  aprovação editorial, declaração e comprovação técnica continuam separadas.
+- **Confiança das decisões:** `verifyDecisionContext(bundle, trustedAnchor)` produz uma capacidade opaca,
+  vinculada ao hash do modelo, snapshot completo (incluindo claims), declarações, manifesto e fontes. A camada
+  externa deve obter a âncora de um registro privado autorizado separado; recalculá-la do bundle recebido
+  destruiria a garantia de integridade. Hash não comprova autoria e não substitui a revisão das fontes.
+  Nem a integração nem o núcleo do validador abrem esses arquivos. A capacidade e seus snapshots não podem
+  ser forjados ou substituídos por um objeto clonado.
+- **Dependências efetivas:** manifesto externo ao modelo cobre variantes selecionadas, campos efetivos,
+  habilidades individuais, links e autorizações. Heranças exigem texto idêntico, origem existente e grafo
+  acíclico, com profundidade e trabalho limitados. As bases declarativas publicadas precisam de decisões
+  correspondentes; cada habilidade tem seu próprio vínculo. Claims históricos retidos não exigem nova
+  confirmação para publicar outro conteúdo. Alterações ou omissões no mapa autorizado, fontes, escopos ou
+  snapshots bloqueiam. Sem capacidade, apenas modelos sem declarações nem dependências declarativas podem
+  prosseguir, como nos testes fictícios sem essas afirmações.
+- **Snapshots e vínculos:** modelo, declarações, mestre, fontes e contexto são copiados antes do primeiro await.
+  Hashes vinculam modelo completo, mestre, declarações, conteúdo resolvido, manifesto, conjunto proibido, layout,
+  contexto local e PDF. Mudanças nos argumentos internos do renderizador ou validador são reconferidas após as
+  operações assíncronas. O PDF só é disponibilizado quando a validação conclui; `artifact.readBytes()` entrega
+  uma cópia nova a cada leitura e o relatório é congelado. A prova se aplica ao hash atestado, não a cópias que
+  o chamador venha a modificar depois.
+- **Conclusão:** `report.complete = true` se e somente se não há falhas de integração, as referências foram
+  autenticadas, H1–H10 existem exatamente uma vez e passaram, os extratores obrigatórios foram utilizados,
+  não existem pendências e todas as fontes têm identidade `verified`, sem ambiguidade ou glifo não comprovado.
+  `pdfjs`, `pdftotext` e `pdffonts` são obrigatórios. Hash, conteúdo, metadados, geometria e páginas são conferidos.
+  `complete = true` implica `ok = true`. A API independente `validateRenderedPdf` permanece diagnóstica e
+  **sempre** devolve `complete = false`, inclusive quando todos os checks passam.
+- **Falhas:** pré-condições inválidas retornam relatório reprovado e nenhum artefato. Erros conhecidos de
+  resolução, renderização, contexto e autenticação são classificados; erros inesperados continuam subindo,
+  nunca são convertidos em sucesso. Não há fallback de fonte, modo sem Poppler ou opção de relaxar checks no
+  contrato estrito.
+
+CLI, persistência, anexos e envio de e-mails permanecem fora desta integração.
+
 ## Relatório de fidelidade
 
 Compara o modelo com o PDF por métodos independentes da leitura estrutural:

@@ -14,9 +14,12 @@ export const FONT_FILES = {
 } as const;
 export const FONT_LICENSE_FILE = join(FONT_DIR, 'OFL.txt');
 
-export interface FontSet {
+export interface RenderFonts {
   regular: Buffer;
   bold: Buffer;
+}
+
+export interface FontSet extends RenderFonts {
   italic: Buffer;
 }
 

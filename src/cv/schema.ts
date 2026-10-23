@@ -66,6 +66,7 @@ export const BASIS_KINDS = [
   'evidencia_codigo',
   'evidencia_execucao',
   'evidencia_publica',
+  'evidencia_documental',
 ] as const;
 export const basisSchema = z.object({
   kind: z.enum(BASIS_KINDS),

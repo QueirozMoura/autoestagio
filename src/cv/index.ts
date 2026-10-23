@@ -66,6 +66,21 @@ export {
 } from './selection.js';
 export { ModelExistsError, loadModel, saveModel, saveReport } from './store.js';
 export {
+  renderAndValidateResume,
+  type StrictResumeInput,
+  type StrictResumeResult,
+  type StrictValidationReport,
+  type StrictBindings,
+  type StrictIssue,
+} from './strict.js';
+export { authenticateLato, FontTrustError, latoHashes, type LatoReference } from './font-policy.js';
+export {
+  verifyDecisionContext,
+  type DecisionContext,
+  type DecisionTrustAnchor,
+  type DecisionVerification,
+} from './decision-context.js';
+export {
   DEFAULT_LAYOUT,
   FONT_DIR,
   FONT_FILES,

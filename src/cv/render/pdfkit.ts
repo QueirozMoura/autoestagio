@@ -10,7 +10,7 @@ import {
   technologiesText,
   tidyResume,
 } from './content.js';
-import { FontLoadError, loadFonts, type FontSet } from './fonts.js';
+import { FontLoadError, loadFonts, type RenderFonts } from './fonts.js';
 import {
   layoutProblems,
   mergeLayout,
@@ -49,6 +49,8 @@ export class RenderError extends Error {
 
 export interface RenderOptions {
   layout?: LayoutOverrides;
+  /** Bytes opcionais fornecidos pela integração; copiados antes de qualquer await. */
+  fonts?: { regular: Uint8Array; bold: Uint8Array };
 }
 
 export interface RenderResult {
@@ -101,7 +103,7 @@ async function renderPass(
   resume: ResolvedResume,
   layout: LayoutConfig,
   step: FitStep,
-  fonts: FontSet,
+  fonts: RenderFonts,
 ): Promise<Pass> {
   const fs = (pt: number): number => pt * step.font;
   const sp = (pt: number): number => pt * step.space;
@@ -466,9 +468,10 @@ export async function renderResume(
   const layout = mergeLayout(options.layout);
   const problems = layoutProblems(layout);
   if (problems.length > 0) throw new RenderError('INVALID_LAYOUT', 'Layout inválido.', problems);
-  let fonts: FontSet;
+  let fonts: RenderFonts;
   try {
-    fonts = loadFonts();
+    const inputFonts = options.fonts ?? loadFonts();
+    fonts = { regular: Buffer.from(inputFonts.regular), bold: Buffer.from(inputFonts.bold) };
   } catch (error) {
     if (error instanceof FontLoadError) throw new RenderError('FONT_MISSING', error.message);
     throw error;
