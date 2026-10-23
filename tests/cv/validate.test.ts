@@ -125,8 +125,8 @@ describe('H1 a H4: PDFs válidos', () => {
     const report = await validateRenderedPdf(result.bytes, resume, { poppler: 'off' });
     expect(report.ok).toBe(true);
     expect(report.complete).toBe(false);
-    expect(report.implemented).toEqual(['H1', 'H2', 'H3', 'H4', 'H5', 'H8', 'H9']);
-    expect(report.pending).toEqual(['H6', 'H7', 'H10']);
+    expect(report.implemented).toEqual(['H1', 'H2', 'H3', 'H4', 'H5', 'H8', 'H9', 'H10']);
+    expect(report.pending).toEqual(['H6', 'H7']);
     expect(report.forbiddenProvided).toBe(false);
     expect(report.checks.map((c) => [c.id, c.status])).toEqual([
       ['H1', 'pass'],
@@ -136,6 +136,7 @@ describe('H1 a H4: PDFs válidos', () => {
       ['H5', 'pass'],
       ['H8', 'pass'],
       ['H9', 'pass'],
+      ['H10', 'pass'],
     ]);
     expect(report.pages).toBe(1);
     expect(report.pdfSha256).toBe(result.pdfSha256);
@@ -221,7 +222,7 @@ describe('H1: integridade e páginas (negativos)', () => {
     expect(report.ok).toBe(false);
     expect(check(report, 'H1').status).toBe('fail');
     expect(check(report, 'H1').details.join(' ')).toMatch(/%PDF-/);
-    for (const id of ['H2', 'H3', 'H4', 'H5', 'H8', 'H9'] as const)
+    for (const id of ['H2', 'H3', 'H4', 'H5', 'H8', 'H9', 'H10'] as const)
       expect(check(report, id).status).toBe('skipped');
     expect(report.pages).toBeNull();
     expect(report.extractors[0]?.status).toBe('error');

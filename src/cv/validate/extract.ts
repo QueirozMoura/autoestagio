@@ -41,6 +41,16 @@ export interface ExtractedPdf {
   pageViews: { view: [number, number, number, number]; rotate: number; userUnit: number }[];
   /** Dicionário Info decodificado pelo pdfjs (só valores de texto). */
   info: Record<string, string>;
+  /** O que o pdfjs enxerga de perigoso ou inesperado (segunda opinião para o H10). */
+  security: {
+    jsActions: boolean;
+    attachments: boolean;
+    formFields: boolean;
+    xfa: boolean;
+    /** Anotações que não são links, e anotações com ação ou destino. */
+    nonLinkAnnotations: string[];
+    annotationsWithActions: number;
+  };
 }
 
 export class PdfReadError extends Error {
@@ -62,6 +72,11 @@ interface RawAnnotation {
   url?: string;
   unsafeUrl?: string;
   rect?: number[];
+  action?: unknown;
+  dest?: unknown;
+  actions?: unknown;
+  attachment?: unknown;
+  jsAction?: unknown;
 }
 
 const isRawItem = (value: unknown): value is RawItem =>
@@ -88,7 +103,18 @@ export async function extractForValidation(bytes: Uint8Array): Promise<Extracted
   const runsPerPage: number[] = [];
   const pageViews: ExtractedPdf['pageViews'] = [];
   let info: Record<string, string>;
+  const nonLinkAnnotations: string[] = [];
+  let annotationsWithActions = 0;
+  let jsActions: boolean;
+  let attachments: boolean;
+  let formFields: boolean;
+  let xfa: boolean;
   try {
+    jsActions =
+      Boolean(await doc.getJSActions()) && Object.keys((await doc.getJSActions()) ?? {}).length > 0;
+    attachments = Boolean(await doc.getAttachments());
+    formFields = Boolean(await doc.getFieldObjects());
+    xfa = doc.isPureXfa;
     const metadata = await doc.getMetadata();
     info = Object.fromEntries(
       Object.entries(metadata.info as unknown as Record<string, unknown>).filter(
@@ -116,6 +142,15 @@ export async function extractForValidation(bytes: Uint8Array): Promise<Extracted
       }
       runsPerPage.push(count);
       for (const a of (await page.getAnnotations()) as unknown as RawAnnotation[]) {
+        if (a.subtype !== 'Link') nonLinkAnnotations.push(a.subtype ?? '(sem subtipo)');
+        if (
+          a.action !== undefined ||
+          a.dest !== undefined ||
+          a.actions !== undefined ||
+          a.attachment !== undefined ||
+          a.jsAction !== undefined
+        )
+          annotationsWithActions += 1;
         if (a.subtype !== 'Link' || a.rect === undefined || a.rect.length < 4) continue;
         const [x1 = 0, y1 = 0, x2 = 0, y2 = 0] = a.rect;
         const url = a.url ?? a.unsafeUrl;
@@ -142,6 +177,14 @@ export async function extractForValidation(bytes: Uint8Array): Promise<Extracted
     pageLines,
     pageViews,
     info,
+    security: {
+      jsActions,
+      attachments,
+      formFields,
+      xfa,
+      nonLinkAnnotations,
+      annotationsWithActions,
+    },
   };
 }
 

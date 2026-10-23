@@ -79,12 +79,14 @@ const isWhite = (c: string): boolean =>
 const isDelimiter = (c: string): boolean => '()<>[]{}/%'.includes(c);
 const isDigit = (c: string | undefined): boolean => c !== undefined && c >= '0' && c <= '9';
 
-class Parser {
+/** Analisador de valores PDF (também usado nos fluxos de conteúdo, onde "N G R" não é referência). */
+export class PdfParser {
   pos = 0;
   tokens = 0;
   constructor(
     readonly src: string,
     readonly limits: StructureLimits,
+    readonly allowRefs = true,
   ) {}
 
   fail(message: string, code: StructureErrorCode = 'MALFORMED'): never {
@@ -247,7 +249,7 @@ class Parser {
     if (match === null) return this.fail('número inválido');
     this.pos += match[0].length;
     const first = Number(match[0]);
-    if (/^\d+$/.test(match[0])) {
+    if (this.allowRefs && /^\d+$/.test(match[0])) {
       const rest = /^\s+(\d+)\s+R(?![A-Za-z0-9])/.exec(this.src.slice(this.pos, this.pos + 40));
       if (rest !== null) {
         this.pos += rest[0].length;
@@ -295,7 +297,7 @@ export function readPdfStructure(
       );
     if (objects.size >= limits.maxObjects)
       throw new PdfStructureError('TOO_MANY_OBJECTS', `mais de ${limits.maxObjects} objetos`);
-    const parser = new Parser(src, limits);
+    const parser = new PdfParser(src, limits);
     parser.pos = match.index + match[0].length;
     const num = Number(match[1]);
     const value = parser.value(0);
@@ -351,7 +353,7 @@ export function readPdfStructure(
     throw new PdfStructureError('UNSUPPORTED', 'mais de um startxref ou %%EOF');
   if (Number(shape[2]) !== xrefAt)
     throw new PdfStructureError('MALFORMED', 'startxref não aponta para a tabela de referências');
-  const trailerParser = new Parser(src, limits);
+  const trailerParser = new PdfParser(src, limits);
   trailerParser.pos = lastEnd + (shape.index + shape[0].indexOf(shape[1] ?? ''));
   const trailer = trailerParser.value(0);
   if (!isDict(trailer)) throw new PdfStructureError('MALFORMED', 'trailer inválido');
@@ -478,6 +480,12 @@ export interface PageInfo {
   extraBoxes: string[];
 }
 
+/** Página com o dicionário e os recursos (herdados da árvore de páginas, se for o caso). */
+export interface PageNode extends PageInfo {
+  dict: PdfDict;
+  resources?: PdfDict;
+}
+
 const numbers = (structure: PdfStructure, value: PdfValue | undefined): number[] | undefined => {
   const resolved = deref(structure, value);
   if (!Array.isArray(resolved)) return undefined;
@@ -485,16 +493,21 @@ const numbers = (structure: PdfStructure, value: PdfValue | undefined): number[]
   return out.every((v): v is number => typeof v === 'number') ? out : undefined;
 };
 
-/** Páginas na ordem do documento, com MediaBox/CropBox/Rotate herdados da árvore de páginas. */
-export function readPages(structure: PdfStructure): PageInfo[] {
+/** Páginas na ordem do documento, com MediaBox/CropBox/Rotate/Resources herdados da árvore de páginas. */
+export function readPageNodes(structure: PdfStructure): PageNode[] {
   const root = dictOf(
     structure,
     dictOf(structure, structure.trailer.map.get('Root'))?.map.get('Pages'),
   );
   if (root === undefined) throw new PdfStructureError('MALFORMED', 'sem árvore de páginas');
-  const pages: PageInfo[] = [];
+  const pages: PageNode[] = [];
   let visited = 0;
-  type Inherited = { mediaBox?: number[]; cropBox?: number[]; rotate?: number };
+  interface Inherited {
+    mediaBox?: number[];
+    cropBox?: number[];
+    rotate?: number;
+    resources?: PdfDict;
+  }
   const walk = (node: PdfDict, num: number, inherited: Inherited, depth: number): void => {
     if (depth > structure.limits.maxDepth)
       throw new PdfStructureError('TOO_DEEP', 'árvore de páginas funda demais');
@@ -505,6 +518,7 @@ export function readPages(structure: PdfStructure): PageInfo[] {
     const cropBox = numbers(structure, node.map.get('CropBox')) ?? inherited.cropBox;
     const rotateRaw = deref(structure, node.map.get('Rotate'));
     const rotate = typeof rotateRaw === 'number' ? rotateRaw : inherited.rotate;
+    const resources = dictOf(structure, node.map.get('Resources')) ?? inherited.resources;
     const kids = deref(structure, node.map.get('Kids'));
     if (nameOf(node.map.get('Type')) === 'Pages' || Array.isArray(kids)) {
       if (!Array.isArray(kids)) throw new PdfStructureError('MALFORMED', 'nó de páginas sem /Kids');
@@ -518,6 +532,7 @@ export function readPages(structure: PdfStructure): PageInfo[] {
             ...(mediaBox ? { mediaBox } : {}),
             ...(cropBox ? { cropBox } : {}),
             ...(rotate === undefined ? {} : { rotate }),
+            ...(resources === undefined ? {} : { resources }),
           },
           depth + 1,
         );
@@ -532,10 +547,24 @@ export function readPages(structure: PdfStructure): PageInfo[] {
       rotate: rotate ?? 0,
       userUnit: typeof unit === 'number' ? unit : 1,
       extraBoxes: ['TrimBox', 'BleedBox', 'ArtBox'].filter((k) => node.map.has(k)),
+      dict: node,
+      ...(resources === undefined ? {} : { resources }),
     });
   };
   walk(root, -1, {}, 0);
   return pages;
+}
+
+/** Páginas (sem os dicionários), como antes. */
+export function readPages(structure: PdfStructure): PageInfo[] {
+  return readPageNodes(structure).map((node) => ({
+    num: node.num,
+    ...(node.mediaBox ? { mediaBox: node.mediaBox } : {}),
+    ...(node.cropBox ? { cropBox: node.cropBox } : {}),
+    rotate: node.rotate,
+    userUnit: node.userUnit,
+    extraBoxes: node.extraBoxes,
+  }));
 }
 
 export interface Surface {

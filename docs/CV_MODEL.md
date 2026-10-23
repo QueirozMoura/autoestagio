@@ -157,8 +157,33 @@ apenas "H1 a H4 passaram".
   Tolerâncias em `GEOMETRY` (2 pt nas margens, 0,1 pt no formato…), cada uma com o motivo no código.
 - **Renderizador:** `tidyResume` normaliza espaços em branco antes de desenhar (o PDFKit cola as palavras quando recebe
   3 ou mais espaços seguidos). Texto bem formado não muda.
-- **Limitação:** texto TOTALMENTE fora da página não aparece nos extratores (pdfjs e Poppler o descartam); detectá-lo
-  exige ler os operadores do fluxo de conteúdo, candidato a uma verificação futura.
+- **Texto totalmente fora da página:** não aparece nos extratores (pdfjs e Poppler o descartam); é detectado no H10,
+  que lê os operadores do fluxo de conteúdo.
+
+### Entrega 2b-i: H10 e o intérprete do fluxo de conteúdo
+
+`implemented` passa a ser H1–H5, H8, H9 e H10; `pending` fica H6 e H7 (`complete` continua `false`).
+
+- **`content-stream.ts`:** interpretador estrito dos operadores de conteúdo da página, só com o que o nosso PDFKit
+  usa: `q Q cm BT ET Tm Tf TJ Tc cs CS scn SCN BDC EMC m l w S`. Compõe a pilha de matrizes (o PDFKit faz dois flips
+  verticais que se anulam), acompanha fonte, tamanho, cor e posição e decodifica cada `TJ` pelo `ToUnicode`
+  (`cmap.ts`, só leitura). **Qualquer outro operador é recusado pelo nome** (`Tr`, `Tj`, `Td`, `Do`, `gs`, `re`, `f`,
+  `W`, `sh`, `BI`…): sem imagem, recorte nem preenchimento, nada cobre ou esconde texto. Se uma atualização do PDFKit
+  passar a usar outro operador, a validação aponta qual.
+- **H10, três camadas:**
+  1. o pdfjs como segunda opinião (JavaScript, anexos, formulários, XFA, anotações com ação ou que não são links);
+  2. a estrutura por **papel** (catálogo, páginas, recursos, fontes, anotações, árvore de estrutura, fluxos): cada
+     dicionário só pode ter as chaves previstas, chaves perigosas (`JavaScript`, `OpenAction`, `AA`, `AcroForm`,
+     `EmbeddedFile`, `Launch`…) e `XObject`/imagem reprovam em qualquer objeto, e **todo objeto precisa estar num
+     caminho permitido**, senão é órfão ou fluxo não autorizado;
+  3. o conteúdo de cada página: operadores, texto **totalmente fora da página** (que o pdfjs e o Poppler descartam),
+     texto branco ou quase branco, tamanho efetivo fora de 8 a 48 pt e glifo sem `ToUnicode`.
+- **Texto dos operadores × pdfjs:** o texto decodificado dos `TJ` precisa ser **igual** ao que o pdfjs extraiu da página.
+  A única diferença ignorada é o espaço comum (U+0020), porque o pdfjs perde ou funde espaços entre trechos
+  ("Stack | 2025" vira "Stack| 2025"); palavras, números, hífens, maiúsculas, pontuação e URLs continuam exatos.
+- **Exceções, todas específicas e cobertas por teste:** objeto órfão só se for um **dicionário vazio sem fluxo** (o
+  PDFKit grava um sem referência); chave `/length` minúscula **só** no fluxo XMP; `/Names` do catálogo **só** com a
+  árvore `/Dests` vazia. Não há exceção genérica para órfãos nem para operadores.
 
 ## Relatório de fidelidade
 

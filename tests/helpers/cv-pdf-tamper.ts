@@ -80,3 +80,38 @@ export function buildPdf(
   parts.push(Buffer.from(table, 'latin1'));
   return Buffer.concat(parts);
 }
+
+/** PDF montado à mão COM a Lato registrada (fonte Type0/Identity-H, como a do renderizador). */
+export function craftLatoPdf(
+  draw: (pdf: PDFKit.PDFDocument) => void,
+  fonts: { regular: Buffer },
+): Promise<Buffer> {
+  return craftPdf((pdf) => {
+    pdf.registerFont('R', fonts.regular);
+    pdf.font('R');
+    draw(pdf);
+  });
+}
+
+/** PNG 1×1 válido (para provocar um XObject de imagem). */
+export const TINY_PNG = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+  'base64',
+);
+
+/**
+ * Corpos de um PDF mínimo e PERMITIDO (catálogo → páginas → página com conteúdo e recursos vazios). Os testes
+ * acrescentam objetos órfãos ou chaves proibidas a ele.
+ */
+export function minimalBodies(
+  options: { catalogExtra?: string; extra?: (string | Buffer)[]; content?: string } = {},
+): (string | Buffer)[] {
+  const content = options.content ?? 'q Q';
+  return [
+    `<< /Type /Catalog /Pages 2 0 R ${options.catalogExtra ?? ''} >>`,
+    '<< /Type /Pages /Count 1 /Kids [3 0 R] >>',
+    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595.28 841.89] /Contents 4 0 R /Resources << /ProcSet [/PDF /Text] /Font << >> /ColorSpace << >> >> >>',
+    `<< /Length ${content.length} >>\nstream\n${content}\nendstream`,
+    ...(options.extra ?? []),
+  ];
+}

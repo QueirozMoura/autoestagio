@@ -11,6 +11,7 @@ import {
   type CheckResult,
 } from './checks.js';
 import { expectedContent } from './expected.js';
+import { checkDangerous } from './dangerous.js';
 import { checkForbiddenContent, type ForbiddenSet } from './forbidden.js';
 import { checkGeometry } from './geometry.js';
 import { checkMetadata } from './metadata.js';
@@ -51,6 +52,23 @@ export {
 export { type CheckId, type CheckResult } from './checks.js';
 export { NO_FORBIDDEN, type ForbiddenSet, type RetainedItem } from './forbidden.js';
 export { GEOMETRY } from './geometry.js';
+export { DANGEROUS_KEYS, MAX_TEXT_PT } from './dangerous.js';
+export { CMapError, parseToUnicode, type CMap } from './cmap.js';
+export {
+  ALLOWED_OPERATORS,
+  IDENTITY,
+  ContentStreamError,
+  analyzeContent,
+  isNearWhite,
+  multiply,
+  readFontResources,
+  tokenizeContent,
+  type ContentAnalysis,
+  type ContentOp,
+  type FontResource,
+  type Matrix,
+  type TextShow,
+} from './content-stream.js';
 export {
   ENVIRONMENT_MARKERS,
   MIN_MARKER_LENGTH,
@@ -102,7 +120,7 @@ export interface ExtractorInfo {
 export interface ValidationReport {
   /** Todas as verificações IMPLEMENTADAS passaram. */
   ok: boolean;
-  /** Sempre `false` nesta entrega: H6, H7 e H10 ainda não existem. */
+  /** Sempre `false` nesta entrega: H6 e H7 ainda não existem. */
   complete: false;
   /** Um `ForbiddenSet` foi informado (sem ele, o H5 só confere texto inválido). */
   forbiddenProvided: boolean;
@@ -114,8 +132,8 @@ export interface ValidationReport {
   checks: CheckResult[];
 }
 
-const IMPLEMENTED: CheckId[] = ['H1', 'H2', 'H3', 'H4', 'H5', 'H8', 'H9'];
-const PENDING = ['H6', 'H7', 'H10'];
+const IMPLEMENTED: CheckId[] = ['H1', 'H2', 'H3', 'H4', 'H5', 'H8', 'H9', 'H10'];
+const PENDING = ['H6', 'H7'];
 const NAMES: Record<CheckId, string> = {
   H1: 'integridade básica e quantidade de páginas',
   H2: 'conteúdo esperado × texto extraído (bidirecional)',
@@ -173,7 +191,7 @@ export async function validateRenderedPdf(
   });
   const checks: CheckResult[] = [integrity];
   if (extracted === undefined || (integrity.status === 'fail' && readError !== undefined)) {
-    for (const id of ['H2', 'H3', 'H4', 'H5', 'H8', 'H9'] as const)
+    for (const id of ['H2', 'H3', 'H4', 'H5', 'H8', 'H9', 'H10'] as const)
       checks.push(skipped(id, NAMES[id], 'depende de H1 (PDF ilegível)'));
   } else {
     const poppler = { mode, text: popplerText };
@@ -218,6 +236,7 @@ export async function validateRenderedPdf(
       }),
       metadata.check,
       checkGeometry({ extracted, expected, layout, pages, structureError }),
+      checkDangerous({ structure, structureError, extracted }),
     );
   }
   return {
