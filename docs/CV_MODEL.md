@@ -185,6 +185,30 @@ apenas "H1 a H4 passaram".
   PDFKit grava um sem referência); chave `/length` minúscula **só** no fluxo XMP; `/Names` do catálogo **só** com a
   árvore `/Dests` vazia. Não há exceção genérica para órfãos nem para operadores.
 
+### Entrega 2b-ii-a: H6 (fontes) e H7 (ligaduras)
+
+`implemented` passa a ser H1–H10 e `pending` fica vazio; **`complete` continua `false`**: faltam a comparação dos glifos
+com a fonte original e da forma com o Unicode (2b-ii-b) e a integração final (2c). Por isso este H6 **não prova que os
+glifos são os da Lato**: confere estrutura, consistência interna e cobertura.
+
+- **`truetype.ts`:** leitor TrueType mínimo e defensivo dos subconjuntos do PDFKit. Cabeçalho `sfnt` (`true` ou
+  `\0\1\0\0`), no máximo 32 tabelas, offsets e tamanhos dentro do arquivo, sem sobreposição ou repetição, **lista exata
+  de tabelas** (`head hhea loca maxp cvt  prep glyf hmtx fpgm`; `GSUB`, `cmap`, `name`, `post`… reprovam), seis
+  obrigatórias, `head` (número mágico, `unitsPerEm` 1000 a 4096, formato do `loca`), `maxp` (1 a 1500 glifos), `hhea` e
+  `hmtx` coerentes, `loca` monotônica e dentro de `glyf`, cada glifo com cabeçalho válido, compostos com componentes
+  existentes, sem ciclo e com profundidade limitada, programa de 1 KB a 200 KB (subconjunto, não a fonte completa).
+  **Checksums não são conferidos:** o PDFKit não os preenche (medido).
+- **H6:** Type0 + `Identity-H` + `CIDFontType2` + `/CIDToGIDMap /Identity` + só `/FontFile2`; nome casando
+  `^[A-Z]{6}\+Lato-(Regular|Bold)$` (configurável) e igual nas três declarações; recusa as 14 fontes padrão; programa
+  legível; `ToUnicode` legível; **cobertura**: todo CID desenhado existe no `ToUnicode` e no programa, o `.notdef` (CID 0) não é desenhado e um glifo vazio só pode representar espaço (senão seria texto invisível).
+- **`pdffonts` (Poppler, `auto`/`require`/`off`):** lê a tabela pela entrada padrão e compara com a estrutura (mesmo
+  conjunto de nomes, `emb`, `sub` e `uni` sim, tipo `CID TrueType`, codificação `Identity-H`).
+- **H7:** examina **todas** as entradas de **todos** os `ToUnicode`: recusa mapeamento composto (mais de um ponto de código,
+  como ligaduras `<0066 0069>` e acento decomposto), ligaduras e formas de apresentação (U+FB00–FB06, FB13–FB17,
+  FB1D–FB4F, FB50–FDFF, FE70–FEFE, U+0132–0133, 01C4–01CC, 01F1–01F3), caracteres invisíveis ou de formatação e
+  inválidos (controle, U+FFFD, uso privado, não caracteres, substitutos soltos); reconfere os textos extraídos (pdfjs,
+  operadores e Poppler). **Exceção específica:** o `.notdef` (CID 0) mapeado para U+0000, como o PDFKit sempre grava.
+
 ## Relatório de fidelidade
 
 Compara o modelo com o PDF por métodos independentes da leitura estrutural:

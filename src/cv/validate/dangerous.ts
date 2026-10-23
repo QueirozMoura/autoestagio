@@ -1,17 +1,14 @@
 import { clip, result, type CheckResult } from './checks.js';
-import { analyzeContent, readFontResources } from './content-stream.js';
+import { analyzePages } from './content-stream.js';
 import type { ExtractedPdf } from './extract.js';
 import { firstDifference } from './normalize.js';
 import {
-  PdfStructureError,
   decodeText,
   deref,
   isDict,
   isPdfString,
   isRef,
   nameOf,
-  readPageNodes,
-  streamBytes,
   type PdfDict,
   type PdfObject,
   type PdfStructure,
@@ -147,6 +144,8 @@ export interface DangerousInput {
   structure: PdfStructure | undefined;
   structureError: string | undefined;
   extracted: ExtractedPdf;
+  /** Análise das páginas já feita (evita ler o conteúdo duas vezes). */
+  analyzed?: ReturnType<typeof analyzePages>;
 }
 
 export function checkDangerous(input: DangerousInput): CheckResult {
@@ -191,7 +190,7 @@ export function checkDangerous(input: DangerousInput): CheckResult {
   add(walkStructure(structure), 'estrutura');
 
   // --- 3. fluxo de conteúdo de cada página
-  add(inspectContent(structure, extracted), 'conteúdo');
+  add(inspectContent(structure, extracted, input.analyzed), 'conteúdo');
 
   return result(
     'H10',
@@ -564,54 +563,24 @@ function walkStructure(structure: PdfStructure): string[] {
 
 // ------------------------------------------------------------------ camada 3: conteúdo das páginas
 
-function inspectContent(structure: PdfStructure, extracted: ExtractedPdf): string[] {
+function inspectContent(
+  structure: PdfStructure,
+  extracted: ExtractedPdf,
+  analyzed?: ReturnType<typeof analyzePages>,
+): string[] {
   const problems: string[] = [];
-  let nodes: ReturnType<typeof readPageNodes>;
-  try {
-    nodes = readPageNodes(structure);
-  } catch (error) {
-    return [
-      `páginas ilegíveis: ${error instanceof PdfStructureError ? error.message : String(error)}`,
-    ];
-  }
-  if (nodes.length !== extracted.pages)
-    problems.push(`a estrutura tem ${nodes.length} página(s) e o pdfjs ${extracted.pages}`);
+  const { pages, problems: pageProblems } = analyzed ?? analyzePages(structure);
+  if (pageProblems.length > 0) return pageProblems;
+  if (pages.length !== extracted.pages)
+    problems.push(`a estrutura tem ${pages.length} página(s) e o pdfjs ${extracted.pages}`);
 
-  nodes.forEach((node, index) => {
-    const page = index + 1;
+  for (const entry of pages) {
+    const page = entry.number;
     const label = `página ${page}`;
-    const contents = deref(structure, node.dict.map.get('Contents'));
-    const refs =
-      Array.isArray(contents) && !isRef(node.dict.map.get('Contents'))
-        ? contents
-        : [node.dict.map.get('Contents')];
-    const chunks: Buffer[] = [];
-    for (const ref of refs) {
-      const object = isRef(ref) ? structure.objects.get(ref.num) : undefined;
-      if (object === undefined || object.stream === undefined) {
-        problems.push(`${label}: /Contents não é um fluxo`);
-        continue;
-      }
-      try {
-        chunks.push(streamBytes(structure, object), Buffer.from('\n'));
-      } catch (error) {
-        problems.push(
-          `${label}: fluxo de conteúdo ilegível (${error instanceof PdfStructureError ? error.message : String(error)})`,
-        );
-      }
-    }
-    const box = node.mediaBox;
-    if (box === undefined || box.length !== 4) {
-      problems.push(`${label}: sem MediaBox para conferir o texto`);
-      return;
-    }
-    const { fonts, problems: fontProblems } = readFontResources(structure, node.resources);
-    problems.push(...fontProblems.map((p) => `${label}: ${p}`));
-    const analysis = analyzeContent(Buffer.concat(chunks), {
-      fonts,
-      pageBox: [box[0] ?? 0, box[1] ?? 0, box[2] ?? 0, box[3] ?? 0],
-      limits: structure.limits,
-    });
+    problems.push(...entry.contentProblems.map((p) => `${label}: ${p}`));
+    const analysis = entry.analysis;
+    if (analysis === undefined) continue;
+    problems.push(...entry.fontProblems.map((p) => `${label}: ${p}`));
     problems.push(...analysis.problems.map((p) => `${label}: ${p}`));
 
     const outside: string[] = [];
@@ -665,6 +634,6 @@ function inspectContent(structure: PdfStructure, extracted: ExtractedPdf): strin
       problems.push(
         `${label}: o texto dos operadores difere do texto extraído pelo pdfjs a partir do caractere ${diff.at} (ignorando só espaços): operadores "${clip(diff.a)}" × pdfjs "${clip(diff.b)}"`,
       );
-  });
+  }
   return problems;
 }

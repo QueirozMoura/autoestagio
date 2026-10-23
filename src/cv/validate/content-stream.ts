@@ -8,8 +8,11 @@ import {
   isDict,
   isPdfString,
   nameOf,
+  isRef,
   objectOf,
+  readPageNodes,
   streamBytes,
+  type PageNode,
   type PdfDict,
   type PdfStructure,
   type PdfValue,
@@ -265,6 +268,8 @@ export interface ContentAnalysis {
   problems: string[];
   /** Texto decodificado de todos os `TJ`, na ordem do fluxo. */
   text: string;
+  /** CIDs desenhados por fonte (nome no recurso), para conferir a cobertura do ToUnicode. */
+  usage: Map<string, Set<number>>;
 }
 
 export interface AnalyzeContext {
@@ -301,6 +306,7 @@ export function analyzeContent(stream: Buffer, context: AnalyzeContext): Content
   };
   const operators = new Map<string, number>();
   const shows: TextShow[] = [];
+  const usage = new Map<string, Set<number>>();
   let text = '';
 
   let tokens: { ops: ContentOp[]; stoppedAt?: string };
@@ -314,6 +320,7 @@ export function analyzeContent(stream: Buffer, context: AnalyzeContext): Content
         `fluxo de conteúdo ilegível: ${error instanceof Error ? error.message : String(error)}`,
       ],
       text,
+      usage,
     };
   }
   if (tokens.stoppedAt !== undefined)
@@ -473,6 +480,9 @@ export function analyzeContent(stream: Buffer, context: AnalyzeContext): Content
             }
             for (let i = 0; i < bytes.length; i += 2) {
               const cid = ((bytes[i] ?? 0) << 8) | (bytes[i + 1] ?? 0);
+              const used = usage.get(font.name) ?? new Set<number>();
+              used.add(cid);
+              usage.set(font.name, used);
               const mapped = font.toUnicode?.map.get(cid);
               if (mapped === undefined) {
                 unmapped += 1;
@@ -525,5 +535,81 @@ export function analyzeContent(stream: Buffer, context: AnalyzeContext): Content
   if (stack.length > 0) report(`${stack.length} "q" sem "Q" no fim do fluxo`);
   if (markedDepth > 0) report(`${markedDepth} "BDC" sem "EMC" no fim do fluxo`);
   if (pathOpen) report('caminho sem traçado ("S") no fim do fluxo');
-  return { shows, operators, problems, text };
+  return { shows, operators, problems, text, usage };
+}
+
+// ------------------------------------------------------------------ páginas inteiras
+
+export interface PageAnalysis {
+  /** Número da página (1 = primeira). */
+  number: number;
+  node: PageNode;
+  fonts: Map<string, FontResource>;
+  /** Problemas ao ler o conteúdo da página, as fontes e os operadores. */
+  contentProblems: string[];
+  fontProblems: string[];
+  /** Ausente quando a página não tem MediaBox para conferir o texto. */
+  analysis?: ContentAnalysis;
+}
+
+/** Bytes do fluxo de conteúdo de uma página (vários fluxos são concatenados, como manda o PDF). */
+export function readPageContent(
+  structure: PdfStructure,
+  node: PageNode,
+): { bytes: Buffer; problems: string[] } {
+  const problems: string[] = [];
+  const value = node.dict.map.get('Contents');
+  const resolved = deref(structure, value);
+  const refs = Array.isArray(resolved) && !isRef(value) ? resolved : [value];
+  const chunks: Buffer[] = [];
+  for (const ref of refs) {
+    const object = isRef(ref) ? structure.objects.get(ref.num) : undefined;
+    if (object?.stream === undefined) {
+      problems.push('/Contents não é um fluxo');
+      continue;
+    }
+    try {
+      chunks.push(streamBytes(structure, object), Buffer.from('\n'));
+    } catch (error) {
+      problems.push(
+        `fluxo de conteúdo ilegível (${error instanceof PdfStructureError ? error.message : String(error)})`,
+      );
+    }
+  }
+  return { bytes: Buffer.concat(chunks), problems };
+}
+
+/** Lê e interpreta o conteúdo de cada página (uma vez), com as fontes dos recursos. */
+export function analyzePages(structure: PdfStructure): {
+  pages: PageAnalysis[];
+  problems: string[];
+} {
+  let nodes: PageNode[];
+  try {
+    nodes = readPageNodes(structure);
+  } catch (error) {
+    return {
+      pages: [],
+      problems: [
+        `páginas ilegíveis: ${error instanceof PdfStructureError ? error.message : String(error)}`,
+      ],
+    };
+  }
+  const pages = nodes.map((node, index): PageAnalysis => {
+    const content = readPageContent(structure, node);
+    const contentProblems = [...content.problems];
+    const { fonts, problems: fontProblems } = readFontResources(structure, node.resources);
+    const box = node.mediaBox;
+    if (box === undefined || box.length !== 4) {
+      contentProblems.push('sem MediaBox para conferir o texto');
+      return { number: index + 1, node, fonts, contentProblems, fontProblems };
+    }
+    const analysis = analyzeContent(content.bytes, {
+      fonts,
+      pageBox: [box[0] ?? 0, box[1] ?? 0, box[2] ?? 0, box[3] ?? 0],
+      limits: structure.limits,
+    });
+    return { number: index + 1, node, fonts, contentProblems, fontProblems, analysis };
+  });
+  return { pages, problems: [] };
 }

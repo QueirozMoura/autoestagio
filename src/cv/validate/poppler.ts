@@ -18,7 +18,11 @@ export interface RunResult {
 }
 
 /** Executa um programa do Poppler com o PDF na entrada padrão. Injetável nos testes. */
-export type PopplerRunner = (command: 'pdftotext', args: string[], input: Buffer) => RunResult;
+export type PopplerRunner = (
+  command: 'pdftotext' | 'pdffonts',
+  args: string[],
+  input: Buffer,
+) => RunResult;
 
 export const defaultRunner: PopplerRunner = (command, args, input) => {
   const run = spawnSync(command, args, {
@@ -43,6 +47,9 @@ export interface PopplerText {
   reading?: string;
   /** O Poppler existe mas falhou ao ler o PDF. */
   error?: string;
+  /** Tabela do `pdffonts` (fontes do documento); ausente se ele falhou (`fontsError`). */
+  fonts?: string;
+  fontsError?: string;
 }
 
 export function runPoppler(bytes: Buffer, runner: PopplerRunner = defaultRunner): PopplerText {
@@ -63,10 +70,16 @@ export function runPoppler(bytes: Buffer, runner: PopplerRunner = defaultRunner)
       ...(version === undefined ? {} : { version }),
       error: `pdftotext terminou com erro: ${(raw.status !== 0 ? raw : reading).stderr.trim().slice(0, 200) || 'sem mensagem'}`,
     };
+  const fonts = runner('pdffonts', ['-'], bytes);
   return {
     available: true,
     ...(version === undefined ? {} : { version }),
     raw: raw.stdout,
     reading: reading.stdout,
+    ...(fonts.status === 0
+      ? { fonts: fonts.stdout }
+      : {
+          fontsError: `pdffonts terminou com erro: ${fonts.stderr.trim().slice(0, 200) || 'sem mensagem'}`,
+        }),
   };
 }

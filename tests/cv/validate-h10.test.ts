@@ -98,7 +98,7 @@ describe('H10: PDFs válidos do renderizador passam', () => {
     const report = await validateRenderedPdf(bytes, resume, OFF);
     expect(check(report, 'H10').summary).toMatch(/objetos, todos em caminhos permitidos/);
     expect(report.implemented).toContain('H10');
-    expect(report.pending).toEqual(['H6', 'H7']);
+    expect(report.pending).toEqual([]);
     expect(report.complete).toBe(false);
   });
 

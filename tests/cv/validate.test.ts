@@ -53,17 +53,35 @@ function fakePoppler(options: {
   reading?: string;
   missing?: boolean;
   failRead?: boolean;
+  /** Tabela do pdffonts (padrão: gerada a partir das fontes do próprio PDF recebido). */
+  fonts?: string;
 }): PopplerRunner {
-  return (_command, args) => {
+  return (command, args, input) => {
     if (options.missing === true) return { status: null, stdout: '', stderr: '' };
     if (args.includes('-v')) return { status: 0, stdout: '', stderr: 'pdftotext version 9.9.9' };
     if (options.failRead === true) return { status: 1, stdout: '', stderr: 'Syntax Error: teste' };
+    if (command === 'pdffonts')
+      return { status: 0, stdout: options.fonts ?? fakePdffonts(input), stderr: '' };
     return {
       status: 0,
       stdout: args.includes('-raw') ? (options.raw ?? '') : (options.reading ?? ''),
       stderr: '',
     };
   };
+}
+
+/** Tabela do `pdffonts` coerente com as fontes do PDF (nome, CID TrueType, Identity-H, emb/sub/uni sim). */
+function fakePdffonts(pdf: Buffer): string {
+  const names = [
+    ...new Set([...pdf.toString('latin1').matchAll(/\/BaseFont \/(\S+)/g)].map((m) => m[1] ?? '')),
+  ];
+  const rows = names.map((n, i) => `${n}  CID TrueType  Identity-H  yes yes yes  ${10 + i}  0`);
+  return [
+    'name type encoding emb sub uni object ID',
+    '------ ---- -------- --- --- --- ---------',
+    ...rows,
+    '',
+  ].join('\n');
 }
 
 /** PDF montado à mão (Helvetica padrão) para casos que o renderizador nunca produz. */
@@ -125,8 +143,19 @@ describe('H1 a H4: PDFs válidos', () => {
     const report = await validateRenderedPdf(result.bytes, resume, { poppler: 'off' });
     expect(report.ok).toBe(true);
     expect(report.complete).toBe(false);
-    expect(report.implemented).toEqual(['H1', 'H2', 'H3', 'H4', 'H5', 'H8', 'H9', 'H10']);
-    expect(report.pending).toEqual(['H6', 'H7']);
+    expect(report.implemented).toEqual([
+      'H1',
+      'H2',
+      'H3',
+      'H4',
+      'H5',
+      'H6',
+      'H7',
+      'H8',
+      'H9',
+      'H10',
+    ]);
+    expect(report.pending).toEqual([]);
     expect(report.forbiddenProvided).toBe(false);
     expect(report.checks.map((c) => [c.id, c.status])).toEqual([
       ['H1', 'pass'],
@@ -134,6 +163,8 @@ describe('H1 a H4: PDFs válidos', () => {
       ['H3', 'pass'],
       ['H4', 'pass'],
       ['H5', 'pass'],
+      ['H6', 'pass'],
+      ['H7', 'pass'],
       ['H8', 'pass'],
       ['H9', 'pass'],
       ['H10', 'pass'],
@@ -222,7 +253,7 @@ describe('H1: integridade e páginas (negativos)', () => {
     expect(report.ok).toBe(false);
     expect(check(report, 'H1').status).toBe('fail');
     expect(check(report, 'H1').details.join(' ')).toMatch(/%PDF-/);
-    for (const id of ['H2', 'H3', 'H4', 'H5', 'H8', 'H9', 'H10'] as const)
+    for (const id of ['H2', 'H3', 'H4', 'H5', 'H6', 'H7', 'H8', 'H9', 'H10'] as const)
       expect(check(report, id).status).toBe('skipped');
     expect(report.pages).toBeNull();
     expect(report.extractors[0]?.status).toBe('error');
@@ -587,9 +618,12 @@ describe('o validador é independente e só trabalha em memória', () => {
         expect(pattern.test(source), `${file} casa ${String(pattern)}`).toBe(false);
   });
 
-  it('o Poppler só roda o pdftotext, com o PDF pela entrada padrão', () => {
+  it('o Poppler só roda o pdftotext e o pdffonts, com o PDF pela entrada padrão', () => {
     const poppler = sources.find((s) => s.file === 'poppler.ts')?.source ?? '';
-    expect(poppler).toContain("command: 'pdftotext'");
+    expect(poppler).toContain("command: 'pdftotext' | 'pdffonts'");
+    const commands = [...poppler.matchAll(/runner\(\s*'([^']+)'/g)].map((m) => m[1]);
+    expect(commands.length).toBeGreaterThanOrEqual(3);
+    expect(commands.every((c) => c === 'pdftotext' || c === 'pdffonts')).toBe(true);
     expect(poppler).toContain('input');
     expect(poppler).not.toMatch(/'(sh|bash|pdftoppm|pdftocairo)'/);
   });

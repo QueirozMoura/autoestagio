@@ -11,7 +11,10 @@ import {
   type CheckResult,
 } from './checks.js';
 import { expectedContent } from './expected.js';
+import { analyzePages } from './content-stream.js';
 import { checkDangerous } from './dangerous.js';
+import { DEFAULT_ALLOWED_FONTS, checkFonts, checkLigatures } from './fonts.js';
+import type { TrueTypeLimits } from './truetype.js';
 import { checkForbiddenContent, type ForbiddenSet } from './forbidden.js';
 import { checkGeometry } from './geometry.js';
 import { checkMetadata } from './metadata.js';
@@ -53,12 +56,32 @@ export { type CheckId, type CheckResult } from './checks.js';
 export { NO_FORBIDDEN, type ForbiddenSet, type RetainedItem } from './forbidden.js';
 export { GEOMETRY } from './geometry.js';
 export { DANGEROUS_KEYS, MAX_TEXT_PT } from './dangerous.js';
+export {
+  DEFAULT_ALLOWED_FONTS,
+  STANDARD_14,
+  classifyMapping,
+  collectFonts,
+  parsePdffonts,
+  suspiciousInText,
+  type FontFacts,
+  type PdffontsRow,
+} from './fonts.js';
+export {
+  ALLOWED_TABLES,
+  DEFAULT_TRUETYPE_LIMITS,
+  REQUIRED_TABLES,
+  readTrueType,
+  type TrueTypeFont,
+  type TrueTypeLimits,
+  type TrueTypeReading,
+} from './truetype.js';
 export { CMapError, parseToUnicode, type CMap } from './cmap.js';
 export {
   ALLOWED_OPERATORS,
   IDENTITY,
   ContentStreamError,
   analyzeContent,
+  analyzePages,
   isNearWhite,
   multiply,
   readFontResources,
@@ -66,6 +89,7 @@ export {
   type ContentAnalysis,
   type ContentOp,
   type FontResource,
+  type PageAnalysis,
   type Matrix,
   type TextShow,
 } from './content-stream.js';
@@ -109,6 +133,10 @@ export interface ValidateOptions {
   localMarkers?: string[];
   /** Limites do leitor estrutural (padrão defensivo). */
   structureLimits?: Partial<StructureLimits>;
+  /** Padrões aceitos para o nome das fontes embutidas (padrão: subconjuntos da Lato). */
+  allowedFonts?: readonly RegExp[];
+  /** Limites do leitor TrueType (padrão defensivo). */
+  fontLimits?: Partial<TrueTypeLimits>;
 }
 
 export interface ExtractorInfo {
@@ -120,7 +148,10 @@ export interface ExtractorInfo {
 export interface ValidationReport {
   /** Todas as verificações IMPLEMENTADAS passaram. */
   ok: boolean;
-  /** Sempre `false` nesta entrega: H6 e H7 ainda não existem. */
+  /**
+   * Sempre `false` aqui: a conferência dos glifos com a fonte original e da forma com o Unicode (2b-ii-b) e a
+   * integração final (2c) ainda não existem.
+   */
   complete: false;
   /** Um `ForbiddenSet` foi informado (sem ele, o H5 só confere texto inválido). */
   forbiddenProvided: boolean;
@@ -132,8 +163,8 @@ export interface ValidationReport {
   checks: CheckResult[];
 }
 
-const IMPLEMENTED: CheckId[] = ['H1', 'H2', 'H3', 'H4', 'H5', 'H8', 'H9', 'H10'];
-const PENDING = ['H6', 'H7'];
+const IMPLEMENTED: CheckId[] = ['H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'H7', 'H8', 'H9', 'H10'];
+const PENDING: string[] = [];
 const NAMES: Record<CheckId, string> = {
   H1: 'integridade básica e quantidade de páginas',
   H2: 'conteúdo esperado × texto extraído (bidirecional)',
@@ -191,7 +222,7 @@ export async function validateRenderedPdf(
   });
   const checks: CheckResult[] = [integrity];
   if (extracted === undefined || (integrity.status === 'fail' && readError !== undefined)) {
-    for (const id of ['H2', 'H3', 'H4', 'H5', 'H8', 'H9', 'H10'] as const)
+    for (const id of ['H2', 'H3', 'H4', 'H5', 'H6', 'H7', 'H8', 'H9', 'H10'] as const)
       checks.push(skipped(id, NAMES[id], 'depende de H1 (PDF ilegível)'));
   } else {
     const poppler = { mode, text: popplerText };
@@ -225,6 +256,16 @@ export async function validateRenderedPdf(
       },
       localMarkers: options.localMarkers ?? [],
     });
+    const analyzed = structure === undefined ? undefined : analyzePages(structure);
+    const fonts = checkFonts({
+      structure,
+      structureError,
+      pages: analyzed?.pages ?? [],
+      poppler,
+      allowedFonts: options.allowedFonts ?? DEFAULT_ALLOWED_FONTS,
+      ...(options.fontLimits === undefined ? {} : { limits: options.fontLimits }),
+    });
+    const operatorText = (analyzed?.pages ?? []).map((p) => p.analysis?.text ?? '').join('\n');
     checks.push(
       checkContent(extracted, expected, poppler),
       checkReadingOrder(extracted, expected, poppler),
@@ -234,9 +275,25 @@ export async function validateRenderedPdf(
         forbidden: options.forbidden,
         metadataTexts: metadata.texts,
       }),
+      fonts.check,
+      checkLigatures({
+        structure,
+        structureError,
+        fonts: fonts.fonts,
+        texts: [
+          { source: 'pdfjs, ordem do fluxo', text: extracted.streamText },
+          { source: 'operadores do conteúdo', text: operatorText },
+          ...(popplerText?.raw === undefined ? [] : [{ source: 'Poppler', text: popplerText.raw }]),
+        ],
+      }),
       metadata.check,
       checkGeometry({ extracted, expected, layout, pages, structureError }),
-      checkDangerous({ structure, structureError, extracted }),
+      checkDangerous({
+        structure,
+        structureError,
+        extracted,
+        ...(analyzed === undefined ? {} : { analyzed }),
+      }),
     );
   }
   return {
