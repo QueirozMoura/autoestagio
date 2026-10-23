@@ -4,6 +4,9 @@ import type { Db } from '../../src/db/index.js';
 import type { EmailContext, MailTransport, SendOutcome } from '../../src/email/index.js';
 import {
   approveForSending,
+  authorizeSend,
+  confirmationCode,
+  preflight,
   resolveRecipientRequirement,
   verifyRecipientFromJob,
 } from '../../src/email/index.js';
@@ -60,13 +63,20 @@ export const decodeRaw = (raw: string): string => Buffer.from(raw, 'base64url').
 /** Candidatura fictícia pronta, revisada, com destinatário verificado e aprovada para envio. */
 export function setupApproved(
   db: Db,
-  options: { job?: SeedJob; approve?: boolean; sendEnabled?: boolean } = {},
+  options: {
+    job?: SeedJob;
+    approve?: boolean;
+    sendEnabled?: boolean;
+    testEvidence?: boolean;
+    /** Endereço escrito na vaga e verificado (padrão: RECIPIENT). */
+    recipient?: string;
+  } = {},
 ): Setup {
   const profile = emailProfile();
   const jobId = seedJob(db, {
     title: 'Estágio em Desenvolvimento Backend',
     company: 'Acme Ficticia',
-    description: `Requisitos: TypeScript e SQL.\nEnvie sua candidatura para ${RECIPIENT}.`,
+    description: `Requisitos: TypeScript e SQL.\nEnvie sua candidatura para ${options.recipient ?? RECIPIENT}.`,
     workMode: 'remoto',
     location: 'Remote - Brazil',
     stipend: 1800,
@@ -83,7 +93,7 @@ export function setupApproved(
   if (result.outcome === 'recusada') throw new Error(`preparo recusado: ${result.reason}`);
   const applicationId = result.applicationId;
 
-  verifyRecipientFromJob(db, jobId, RECIPIENT, { now: NOW });
+  verifyRecipientFromJob(db, jobId, options.recipient ?? RECIPIENT, { now: NOW });
   resolveRecipientRequirement(db, applicationId, NOW);
   markReviewed(db, applicationId, profileHash(profile), NOW);
 
@@ -99,11 +109,73 @@ export function setupApproved(
     readCv: () => cv.bytes,
     now: () => NOW,
   };
-  if (options.approve !== false) approveForSending(ctx, applicationId, 'teste');
+  if (options.approve !== false) {
+    approveForSending(ctx, applicationId, 'teste');
+    if (options.testEvidence !== false) seedTestEvidence(ctx, applicationId);
+  }
   return { db, applicationId, jobId, transport, cv, ctx };
 }
 
 export { setApplicationMode };
+
+/** Código de confirmação do envio real, como o mostraria "email preview-final". */
+export function confirmFor(ctx: EmailContext, applicationId: number): string {
+  const plan = preflight(ctx, applicationId, 'real').plan;
+  // Sem mensagem montada não há código: devolve um inválido para que `authorizeSend` falhe pelo seu próprio motivo.
+  return plan === undefined ? 'xxxxxxxx' : confirmationCode(plan.bindingHash);
+}
+
+/** `authorizeSend` com o código de confirmação do conteúdo atual (envio real), como faria o operador. */
+export function authorizeConfirmed(
+  ctx: EmailContext,
+  applicationId: number,
+  kind: 'real' | 'teste',
+  reason: string,
+  ttlMinutes?: number,
+) {
+  return authorizeSend(
+    ctx,
+    applicationId,
+    kind,
+    reason,
+    ttlMinutes,
+    kind === 'real' ? confirmFor(ctx, applicationId) : undefined,
+  );
+}
+
+/**
+ * Evidência de um envio de TESTE aceito para o conteúdo, o anexo e o destinatário reais atuais (a mesma linha que
+ * `sendEmail(..., 'teste')` grava), sem chamar nenhum transporte. Só para montar cenários de teste.
+ */
+export function seedTestEvidence(ctx: EmailContext, applicationId: number): void {
+  const plan = preflight(ctx, applicationId, 'real').plan;
+  if (plan === undefined)
+    throw new Error('a mensagem não pôde ser montada: sem evidência de teste');
+  const at = (ctx.now ?? (() => new Date()))().toISOString();
+  const auth = Number(
+    ctx.db
+      .prepare(
+        "INSERT INTO email_authorizations (application_id, kind, binding_hash, reason, created_at, expires_at, used_at) VALUES (?, 'teste', ?, 'evidência de teste (fixture)', ?, ?, ?)",
+      )
+      .run(applicationId, 'e'.repeat(64), at, at, at).lastInsertRowid,
+  );
+  ctx.db
+    .prepare(
+      `INSERT INTO email_dispatches (application_id, kind, recipient_masked, status, rfc_message_id, cv_sha256, content_hash,
+         authorization_id, reserved_at, finished_at, intended_binding_hash)
+       VALUES (?, 'teste', 'm***@exemplo.org', 'aceito', ?, ?, ?, ?, ?, ?, ?)`,
+    )
+    .run(
+      applicationId,
+      `<fixture-${auth}@autoestagio.local>`,
+      plan.cvSha256,
+      plan.contentHash,
+      auth,
+      at,
+      at,
+      plan.bindingHash,
+    );
+}
 
 /** Decodifica uma mensagem MIME multipart/mixed simples (a que o projeto gera). */
 export function parseMime(mime: string): {

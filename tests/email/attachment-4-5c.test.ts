@@ -33,7 +33,6 @@ import { IN_MEMORY, openDatabase, runMigrations, type Db } from '../../src/db/in
 import {
   EmailError,
   approveForSending,
-  authorizeSend,
   bindingHashOf,
   dryRunEmail,
   exportEml,
@@ -50,7 +49,9 @@ import {
   CV_SHA,
   RECIPIENT,
   TEST_MAILBOX,
+  authorizeConfirmed,
   parseMime,
+  seedTestEvidence,
   setupApproved,
   type Setup,
 } from '../helpers/email.js';
@@ -88,11 +89,20 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+/** Conta linhas; em `email_dispatches` só as de envio REAL (a evidência de teste da fixture não conta). */
 const count = (table: string): number =>
-  (db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get() as { n: number }).n;
+  (
+    db
+      .prepare(
+        `SELECT COUNT(*) AS n FROM ${table}${table === 'email_dispatches' ? " WHERE kind = 'real'" : ''}`,
+      )
+      .get() as { n: number }
+  ).n;
 const failing = (ctx: EmailContext = s.ctx, kind: 'real' | 'teste' = 'real'): string[] =>
   preflight(ctx, s.applicationId, kind)
-    .checks.filter((c) => !c.ok && c.sendOnly !== true && c.id !== 'estado_e_modo')
+    .checks.filter(
+      (c) => !c.ok && c.sendOnly !== true && c.id !== 'estado_e_modo' && c.id !== 'teste_previo',
+    )
     .map((c) => c.id);
 
 /** Banco novo, migrado, com candidatura preparada (e aprovada para envio, se pedido). */
@@ -148,6 +158,7 @@ function personalized(): EmailContext {
   link(true);
   const ctx = withAttachment(resolved());
   approveForSending(ctx, s.applicationId, 'teste');
+  seedTestEvidence(ctx, s.applicationId);
   s.ctx = ctx;
   return ctx;
 }
@@ -251,7 +262,9 @@ describe('seleção do anexo no preflight', () => {
           result.checks.filter((c) => !c.ok && c.sendOnly !== true).map((c) => c.id),
         ).toContain('vinculo_curriculo');
         expect(result.plan).toBeUndefined();
-        expect(() => authorizeSend(ctx, s.applicationId, 'real', 'autorizo')).toThrow(EmailError);
+        expect(() => authorizeConfirmed(ctx, s.applicationId, 'real', 'autorizo')).toThrow(
+          EmailError,
+        );
       }
       expect(() => approveForSending(withAttachment(undefined), s.applicationId, 'x')).toThrow(
         /vinculo_curriculo/,
@@ -286,7 +299,7 @@ describe('seleção do anexo no preflight', () => {
 describe('autorizações de envio e vínculo', () => {
   it('envia (com Gmail simulado) o PDF personalizado, e só ele', async () => {
     const ctx = personalized();
-    const authorization = authorizeSend(
+    const authorization = authorizeConfirmed(
       ctx,
       s.applicationId,
       'real',
@@ -305,7 +318,7 @@ describe('autorizações de envio e vínculo', () => {
   it('autorização emitida antes do vínculo (currículo mestre) não vale depois dele', async () => {
     const master = freshSetup({ approve: true });
     const LT = new Date(NOW.getTime() + 5 * 60_000);
-    const old = authorizeSend(master.ctx, master.applicationId, 'real', 'autorizo (antigo)');
+    const old = authorizeConfirmed(master.ctx, master.applicationId, 'real', 'autorizo (antigo)');
     // Volta a "preparada", cria e aprova o vínculo e aprova de novo para envio.
     transitionApplication(
       master.db,
@@ -345,6 +358,7 @@ describe('autorizações de envio e vínculo', () => {
       },
     };
     approveForSending(ctx, master.applicationId, 'de novo');
+    seedTestEvidence(ctx, master.applicationId);
     // O gatilho do banco venceu a autorização antiga...
     const later: EmailContext = { ...ctx, now: () => new Date(LT.getTime() + 1000) };
     await expect(sendEmail(later, master.applicationId, old.id, 'real')).rejects.toThrow(/venceu/);
@@ -357,13 +371,17 @@ describe('autorizações de envio e vínculo', () => {
     );
     expect(master.transport.calls).toEqual([]);
     expect(
-      (master.db.prepare('SELECT COUNT(*) AS n FROM email_dispatches').get() as { n: number }).n,
+      (
+        master.db
+          .prepare("SELECT COUNT(*) AS n FROM email_dispatches WHERE kind = 'real'")
+          .get() as { n: number }
+      ).n,
     ).toBe(0);
   });
 
   it('autorização vencida não envia', async () => {
     const ctx = personalized();
-    const authorization = authorizeSend(ctx, s.applicationId, 'real', 'autorizo', 1);
+    const authorization = authorizeConfirmed(ctx, s.applicationId, 'real', 'autorizo', 1);
     const later: EmailContext = { ...ctx, now: () => new Date(NOW.getTime() + 2 * 60_000) };
     await expect(sendEmail(later, s.applicationId, authorization.id, 'real')).rejects.toThrow(
       /venceu/,
@@ -373,7 +391,7 @@ describe('autorizações de envio e vínculo', () => {
 
   it('alteração do vínculo depois da autorização a invalida (revogação e troca)', async () => {
     const ctx = personalized();
-    const authorization = authorizeSend(ctx, s.applicationId, 'real', 'autorizo');
+    const authorization = authorizeConfirmed(ctx, s.applicationId, 'real', 'autorizo');
     const revokedAt = new Date(NOW.getTime() + 5 * 60_000);
     revokeAttachment(db, {
       applicationId: s.applicationId,
@@ -595,7 +613,7 @@ describe('exportação .eml local', () => {
   it('o preflight geral não mudou: o envio de teste continua aceitando candidatura preparada', async () => {
     expect(getApplication(db, s.applicationId)?.status).toBe('preparada');
     expect(failing(s.ctx, 'teste')).toEqual([]);
-    const authorization = authorizeSend(s.ctx, s.applicationId, 'teste', 'autorizo o teste');
+    const authorization = authorizeConfirmed(s.ctx, s.applicationId, 'teste', 'autorizo o teste');
     const result = await sendEmail(s.ctx, s.applicationId, authorization.id, 'teste');
     expect(result.outcome).toBe('aceito');
     expect(s.transport.calls).toHaveLength(1);
@@ -731,7 +749,14 @@ describe('privacidade e ausência de envio', () => {
     expect(result.recipientMasked).toBe('r***@acme-ficticia.com.br');
     expect(s.transport.calls).toEqual([]);
     expect(count('email_dispatches')).toBe(0);
-    expect(count('email_authorizations')).toBe(0);
+    // Nenhuma autorização nova (a única é a evidência usada da fixture).
+    expect(
+      (
+        db
+          .prepare('SELECT COUNT(*) AS n FROM email_authorizations WHERE used_at IS NULL')
+          .get() as { n: number }
+      ).n,
+    ).toBe(0);
     for (const row of getHistory(db, s.applicationId))
       expect(row.reason).not.toMatch(/[a-f0-9]{16,}/u);
   });

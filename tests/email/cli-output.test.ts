@@ -1,17 +1,11 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { IN_MEMORY, openDatabase, runMigrations } from '../../src/db/index.js';
 import { formatDispatches, formatDryRun } from '../../src/cli/email.js';
-import {
-  authorizeSend,
-  dryRunEmail,
-  listDispatches,
-  loadEmailConfig,
-  sendEmail,
-} from '../../src/email/index.js';
+import { dryRunEmail, listDispatches, loadEmailConfig, sendEmail } from '../../src/email/index.js';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { CV_SHA, RECIPIENT, setupApproved } from '../helpers/email.js';
+import { CV_SHA, RECIPIENT, authorizeConfirmed, setupApproved } from '../helpers/email.js';
 
 let s: ReturnType<typeof setupApproved>;
 beforeEach(() => {
@@ -47,7 +41,7 @@ describe('saída da CLI de e-mail', () => {
   });
 
   it('o status mostra as três confirmações separadas e nenhum dado sensível', async () => {
-    const auth = authorizeSend(s.ctx, s.applicationId, 'real', 'ok');
+    const auth = authorizeConfirmed(s.ctx, s.applicationId, 'real', 'ok');
     await sendEmail(s.ctx, s.applicationId, auth.id, 'real');
     const text = formatDispatches(listDispatches(s.db, s.applicationId));
     expect(text).toContain('aceito pelo Gmail:           sim');

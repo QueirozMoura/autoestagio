@@ -3,7 +3,7 @@ import type { LanguageLevel, Profile } from '../config/index.js';
 import { technologiesIn } from '../eligibility/requirements.js';
 
 /** Muda quando o texto ou as regras de geração mudam: rascunhos antigos ficam "desatualizados". */
-export const GENERATOR_VERSION = '1';
+export const GENERATOR_VERSION = '2';
 
 export interface DraftJob {
   title: string;
@@ -82,10 +82,11 @@ function date(iso: string): string {
 export function generateDraft(input: {
   profile: Profile;
   job: DraftJob;
+  /** Identificação do currículo da candidatura. NÃO entra no texto: o anexo efetivo pode ser outro (vínculo). */
   cvLabel: string;
   now: Date;
 }): GeneratedDraft {
-  const { profile, job, cvLabel, now } = input;
+  const { profile, job, now } = input;
   const facts: Fact[] = [];
   const title = cleanInline(job.title) || 'vaga de estágio';
   const company = job.company === null ? '' : cleanInline(job.company, 80);
@@ -181,7 +182,7 @@ export function generateDraft(input: {
   }
 
   paragraphs.push(
-    `Segue meu currículo em anexo (${cvLabel}). Fico à disposição para conversar sobre a oportunidade.`,
+    'Segue meu currículo em anexo. Fico à disposição para conversar sobre a oportunidade.',
   );
   paragraphs.push(`Atenciosamente,\n${profile.name}`);
 

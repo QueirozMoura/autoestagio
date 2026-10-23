@@ -4,7 +4,6 @@ import { IN_MEMORY, openDatabase, runMigrations, type Db } from '../../src/db/in
 import {
   EmailError,
   approveForSending,
-  authorizeSend,
   dryRunEmail,
   listDispatches,
   preflight,
@@ -21,6 +20,8 @@ import {
   CV_BYTES,
   CV_SHA,
   RECIPIENT,
+  authorizeConfirmed,
+  seedTestEvidence,
   TEST_MAILBOX,
   decodeRaw,
   parseMime,
@@ -37,13 +38,25 @@ beforeEach(() => {
 });
 
 const authorize = (kind: 'real' | 'teste' = 'real', setup = s) =>
-  authorizeSend(setup.ctx, setup.applicationId, kind, 'autorizo este envio específico (teste)');
+  authorizeConfirmed(
+    setup.ctx,
+    setup.applicationId,
+    kind,
+    'autorizo este envio específico (teste)',
+  );
 const status = (setup = s) => getApplication(setup.db, setup.applicationId)?.status;
+/** Conta linhas; em `email_dispatches` só as de envio REAL (a evidência de teste da fixture não conta). */
 const count = (table: string): number =>
-  (db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get() as { n: number }).n;
+  (
+    db
+      .prepare(
+        `SELECT COUNT(*) AS n FROM ${table}${table === 'email_dispatches' ? " WHERE kind = 'real'" : ''}`,
+      )
+      .get() as { n: number }
+  ).n;
 const failing = (ctx = s.ctx, kind: 'real' | 'teste' = 'real') =>
   preflight(ctx, s.applicationId, kind)
-    .checks.filter((c) => !c.ok)
+    .checks.filter((c) => !c.ok && c.id !== 'teste_previo')
     .map((c) => c.id);
 
 describe('ensaio (dry-run) — padrão, nunca chama o Gmail', () => {
@@ -120,7 +133,7 @@ describe('verificações antes de enviar (bloqueios)', () => {
     const fresh = setupApproved(openDb(), { approve: false });
     expect(
       preflight(fresh.ctx, fresh.applicationId, 'real')
-        .checks.filter((c) => !c.ok)
+        .checks.filter((c) => !c.ok && c.id !== 'teste_previo')
         .map((c) => c.id),
     ).toEqual(['estado_e_modo']);
     // sem revisão
@@ -199,7 +212,7 @@ describe('autorização específica e de uso único', () => {
   });
 
   it('autorização expirada', async () => {
-    const auth = authorizeSend(s.ctx, s.applicationId, 'real', 'ok', 5);
+    const auth = authorizeConfirmed(s.ctx, s.applicationId, 'real', 'ok', 5);
     const later = { ...s.ctx, now: () => new Date(NOW.getTime() + 6 * 60_000) };
     await expect(sendEmail(later, s.applicationId, auth.id, 'real')).rejects.toThrow(/venceu/);
     expect(s.transport.calls).toEqual([]);
@@ -220,6 +233,8 @@ describe('autorização específica e de uso único', () => {
   it('é amarrada ao conteúdo: se o destinatário mudar depois, não vale mais', async () => {
     const auth = authorize();
     db.prepare("UPDATE verified_recipients SET email = 'outro@acme-ficticia.com.br'").run();
+    // Para isolar a vinculação, o teste prévio é refeito para o novo destinatário.
+    seedTestEvidence(s.ctx, s.applicationId);
     await expect(sendEmail(s.ctx, s.applicationId, auth.id, 'real')).rejects.toThrow(
       /mudaram depois da autorização/,
     );
@@ -247,9 +262,11 @@ describe('autorização específica e de uso único', () => {
   });
 
   it('exige motivo e validade razoável', () => {
-    expect(() => authorizeSend(s.ctx, s.applicationId, 'real', '  ')).toThrow(/motivo/);
-    expect(() => authorizeSend(s.ctx, s.applicationId, 'real', 'ok', 0)).toThrow(/validade/);
-    expect(() => authorizeSend(s.ctx, s.applicationId, 'real', 'ok', 1000)).toThrow(/validade/);
+    expect(() => authorizeConfirmed(s.ctx, s.applicationId, 'real', '  ')).toThrow(/motivo/);
+    expect(() => authorizeConfirmed(s.ctx, s.applicationId, 'real', 'ok', 0)).toThrow(/validade/);
+    expect(() => authorizeConfirmed(s.ctx, s.applicationId, 'real', 'ok', 1000)).toThrow(
+      /validade/,
+    );
   });
 });
 
@@ -266,7 +283,8 @@ describe('envio aceito pelo Gmail', () => {
       appliedAt: NOW.toISOString(),
     });
     const view = listDispatches(db, s.applicationId);
-    expect(view.dispatches).toEqual([
+    // A evidência de teste da fixture (kind "teste") não faz parte deste envio real.
+    expect(view.dispatches.filter((d) => d.kind === 'real')).toEqual([
       expect.objectContaining({
         status: 'aceito',
         kind: 'real',
@@ -276,7 +294,11 @@ describe('envio aceito pelo Gmail', () => {
     ]);
     expect(view.confirmations.map((c) => c.kind)).toEqual(['aceito_pelo_gmail']); // só isto: sem entrega, sem recebimento
     expect(
-      db.prepare('SELECT gmail_message_id, gmail_thread_id FROM email_dispatches').get(),
+      db
+        .prepare(
+          "SELECT gmail_message_id, gmail_thread_id FROM email_dispatches WHERE kind = 'real'",
+        )
+        .get(),
     ).toEqual({ gmail_message_id: 'fake-1', gmail_thread_id: 'fake-thread' });
 
     const transitions = getHistory(db, s.applicationId).map((e) => e.toStatus);
@@ -382,11 +404,19 @@ describe('recusa do Gmail antes de enviar', () => {
   it('vira "falhou", registra só a categoria e não reenvia sozinho', async () => {
     s.transport.next({ kind: 'rejected', category: 'http_403' });
     const result = await sendEmail(s.ctx, s.applicationId, authorize().id, 'real');
-    expect(result).toEqual({ outcome: 'rejeitado', dispatchId: 1, category: 'http_403' });
+    expect(result).toEqual({
+      outcome: 'rejeitado',
+      dispatchId: expect.any(Number) as number,
+      category: 'http_403',
+    });
     expect(status()).toBe('falhou');
     expect(s.transport.calls).toHaveLength(1);
     expect(
-      db.prepare('SELECT status, error_category, gmail_message_id FROM email_dispatches').get(),
+      db
+        .prepare(
+          "SELECT status, error_category, gmail_message_id FROM email_dispatches WHERE kind = 'real'",
+        )
+        .get(),
     ).toEqual({ status: 'rejeitado', error_category: 'http_403', gmail_message_id: null });
     expect(listDispatches(db, s.applicationId).confirmations).toEqual([]);
   });
@@ -440,7 +470,9 @@ describe('resultado desconhecido: nunca reenviar', () => {
 
     resolveUnknownDispatch(db, s.applicationId, { sent: true, evidence: 'achei em Enviados' }, NOW);
     expect(status()).toBe('enviada');
-    expect(db.prepare('SELECT status, error_category FROM email_dispatches').get()).toEqual({
+    expect(
+      db.prepare("SELECT status, error_category FROM email_dispatches WHERE kind = 'real'").get(),
+    ).toEqual({
       status: 'aceito',
       error_category: 'confirmado_manualmente',
     });
@@ -531,7 +563,7 @@ describe('recuperação após falha do processo', () => {
 
     expect(s.transport.calls).toHaveLength(1);
     expect(status()).toBe('enviando');
-    expect(db.prepare('SELECT status FROM email_dispatches').get()).toEqual({
+    expect(db.prepare("SELECT status FROM email_dispatches WHERE kind = 'real'").get()).toEqual({
       status: 'reservado',
     });
 
@@ -543,9 +575,11 @@ describe('recuperação após falha do processo', () => {
       }),
     ).toEqual([]);
     const later = new Date(NOW.getTime() + 11 * 60_000);
-    expect(recoverEmailDispatches(db, { olderThanMs: 10 * 60_000, now: later })).toEqual([1]);
+    expect(recoverEmailDispatches(db, { olderThanMs: 10 * 60_000, now: later })).toHaveLength(1);
     expect(status()).toBe('pendente_intervencao_humana');
-    expect(db.prepare('SELECT status, error_category FROM email_dispatches').get()).toEqual({
+    expect(
+      db.prepare("SELECT status, error_category FROM email_dispatches WHERE kind = 'real'").get(),
+    ).toEqual({
       status: 'desconhecido',
       error_category: 'processo_interrompido',
     });
@@ -582,7 +616,11 @@ describe('envio de TESTE para a sua caixa', () => {
     expect(status()).toBe('aprovada_para_envio');
     expect(getApplication(db, s.applicationId)?.appliedAt).toBeNull();
     expect(listDispatches(db, s.applicationId).confirmations).toEqual([]);
-    expect(db.prepare('SELECT kind, status FROM email_dispatches').get()).toEqual({
+    expect(
+      db
+        .prepare("SELECT kind, status FROM email_dispatches WHERE kind = 'teste' ORDER BY id DESC")
+        .get(),
+    ).toEqual({
       kind: 'teste',
       status: 'aceito',
     });
@@ -598,10 +636,10 @@ describe('envio de TESTE para a sua caixa', () => {
 
   it('exige caixa de teste configurada e o rascunho em dia', () => {
     expect(() =>
-      authorizeSend({ ...s.ctx, testMailbox: undefined }, s.applicationId, 'teste', 'ok'),
+      authorizeConfirmed({ ...s.ctx, testMailbox: undefined }, s.applicationId, 'teste', 'ok'),
     ).toThrow(/caixa_de_teste/);
     expect(() =>
-      authorizeSend({ ...s.ctx, testMailbox: 'invalido' }, s.applicationId, 'teste', 'ok'),
+      authorizeConfirmed({ ...s.ctx, testMailbox: 'invalido' }, s.applicationId, 'teste', 'ok'),
     ).toThrow(/caixa_de_teste/);
   });
 
@@ -616,7 +654,7 @@ describe('envio de TESTE para a sua caixa', () => {
   it('pode ser feito antes da aprovação (candidatura só "preparada")', async () => {
     const d = openDb();
     const fresh = setupApproved(d, { approve: false });
-    const auth = authorizeSend(fresh.ctx, fresh.applicationId, 'teste', 'ok');
+    const auth = authorizeConfirmed(fresh.ctx, fresh.applicationId, 'teste', 'ok');
     expect((await sendEmail(fresh.ctx, fresh.applicationId, auth.id, 'teste')).outcome).toBe(
       'aceito',
     );

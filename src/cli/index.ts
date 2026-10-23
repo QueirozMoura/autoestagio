@@ -39,6 +39,7 @@ import {
 import { analyzeJobs, profileHash, VERDICTS, type Verdict } from '../eligibility/index.js';
 import { loadSourcesConfig } from '../sources/index.js';
 import { formatAnalysis } from './analyze.js';
+import { registerApplyCommands } from './apply-commands.js';
 import { registerCvCommands } from './cv-commands.js';
 import { registerEmailCommands } from './email-commands.js';
 import { formatCandidates, formatPrepareResult, formatPreview } from './preparation.js';
@@ -474,6 +475,7 @@ async function withDbAsync<T>(fn: (db: ReturnType<typeof openDatabase>) => Promi
 
 registerEmailCommands(program, { withDb, withDbAsync, parseId });
 registerCvCommands(program);
+registerApplyCommands(program, { withDbAsync, parseId });
 
 try {
   await program.parseAsync();

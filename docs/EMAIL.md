@@ -212,3 +212,25 @@ a candidatura esteja **aprovada para envio (`email approve`) — também com `--
 em `data/eml-drafts/` (padrão; 0700; arquivo 0600; nunca sobrescreve), com a mesma escrita privada de `cv generate`.
 O MIME é validado antes de gravar (destinatário, corpo, anexo e fronteira). Não muda o estado da candidatura e só
 registra um evento. O `dry-run` comum nunca cria `.eml`. O arquivo contém dados pessoais: mantenha-o privado.
+
+## Envio controlado (Etapa 4.6)
+
+Roteiro passo a passo em [`SEND_RUNBOOK.md`](SEND_RUNBOOK.md). Em resumo, o envio **real** passa a exigir, além de tudo o
+que já existia:
+
+- **Código de confirmação** (`email preview-final` → `email authorize --confirm <código>`): derivado do conteúdo, do anexo (com a
+  identidade do vínculo) e do destinatário reais; muda se qualquer um mudar. Não substitui a autorização de uso único.
+- **Envio de teste aceito** para exatamente esse conteúdo, anexo e destinatário real pretendido (evidência persistida em
+  `email_dispatches.intended_binding_hash`, migração 0009), **com no máximo 24 h** (pelo horário persistido do despacho aceito;
+  horário inválido ou futuro além de 2 min de tolerância invalida). Dry-run e `.eml` não contam; qualquer mudança a invalida.
+- **Intervalo mínimo de 15 minutos** entre envios reais e **30 dias** sem repetir o mesmo destinatário (normalizado) em outra
+  candidatura. Envios de resultado incerto contam (conservador). Não há bypass. Os envios de teste não são afetados.
+- `apply status <candidatura>` mostra todas as etapas e a próxima ação (somente leitura).
+
+Esses portões bloqueiam `authorize` e `send`; não impedem aprovar, ensaiar ou exportar o `.eml`. O texto do rascunho não cita mais
+o nome do arquivo do currículo mestre ("Segue meu currículo em anexo.").
+
+Os limites, o teste prévio, a autorização de uso único e a anti-duplicação são **reavaliados dentro da transação imediata da
+reserva do envio** (SQLite `BEGIN IMMEDIATE`, que serializa os escritores), e não só no preflight: duas execuções simultâneas
+para candidaturas diferentes não passam juntas por limites globais ou de destinatário. A transação termina antes da chamada ao
+Gmail (nenhuma transação fica aberta durante a rede).

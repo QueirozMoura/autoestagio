@@ -30,6 +30,7 @@ export {
   isFreemail,
   listRecipients,
   maskEmail,
+  normalizeRecipient,
   usableRecipient,
   verifyRecipientFromJob,
   verifyRecipientFromPage,
@@ -42,6 +43,11 @@ export {
   approveForSending,
   authorizeSend,
   bindingHashOf,
+  confirmationCode,
+  MIN_INTERVAL_MIN,
+  TEST_EVIDENCE_FUTURE_TOLERANCE_MIN,
+  TEST_EVIDENCE_MAX_HOURS,
+  REPEAT_RECIPIENT_DAYS,
   dryRunEmail,
   listDispatches,
   preflight,
@@ -61,3 +67,4 @@ export {
 } from './send.js';
 export { loadEmailConfig, type EmailConfig } from './config.js';
 export { exportEml, verifyMime, type EmlExportOptions, type EmlExportResult } from './eml.js';
+export { buildFinalPreview, formatFinalPreview, type FinalPreview } from './final-preview.js';

@@ -30,20 +30,22 @@ instalação falhar, instale as ferramentas de compilação (`build-essential` e
 
 ## Comandos
 
-| Comando                                | Descrição                                                                                 |
-| -------------------------------------- | ----------------------------------------------------------------------------------------- |
-| `npm run dev -- status`                | Mostra modo, perfil e estado do banco (`--json` disponível)                               |
-| `npm run dev -- migrate`               | Cria o banco e aplica migrações pendentes                                                 |
-| `npm run dev -- scan`                  | Coleta estágios nas fontes de `config/sources.json` (Greenhouse e Lever), somente leitura |
-| `npm run dev -- scan --simulate`       | Coleta simulada com fontes fictícias, sem rede (veja abaixo)                              |
-| `npm run dev -- cv variants`           | Lista as variantes do currículo (estado editorial, elegibilidade, pré-condições)          |
-| `npm run dev -- cv generate`           | Gera e grava o PDF de uma variante pelo fluxo estrito (veja `docs/CV_GENERATE.md`)        |
-| `npm run dev -- email export-eml <id>` | Exporta um rascunho local `.eml` (sem enviar nada; veja `docs/EMAIL.md`)                  |
-| `npm run build` / `start`              | Compila para `dist/` e executa a versão compilada                                         |
-| `npm test`                             | Testes (Vitest)                                                                           |
-| `npm run typecheck`                    | Verificação de tipos (TypeScript strict)                                                  |
-| `npm run lint`                         | ESLint                                                                                    |
-| `npm run format`                       | Prettier                                                                                  |
+| Comando                                   | Descrição                                                                                 |
+| ----------------------------------------- | ----------------------------------------------------------------------------------------- |
+| `npm run dev -- status`                   | Mostra modo, perfil e estado do banco (`--json` disponível)                               |
+| `npm run dev -- migrate`                  | Cria o banco e aplica migrações pendentes                                                 |
+| `npm run dev -- scan`                     | Coleta estágios nas fontes de `config/sources.json` (Greenhouse e Lever), somente leitura |
+| `npm run dev -- scan --simulate`          | Coleta simulada com fontes fictícias, sem rede (veja abaixo)                              |
+| `npm run dev -- cv variants`              | Lista as variantes do currículo (estado editorial, elegibilidade, pré-condições)          |
+| `npm run dev -- cv generate`              | Gera e grava o PDF de uma variante pelo fluxo estrito (veja `docs/CV_GENERATE.md`)        |
+| `npm run dev -- apply status <id>`        | Andamento da candidatura e próxima ação (somente leitura)                                 |
+| `npm run dev -- email preview-final <id>` | Prévia final e código de confirmação do envio real (veja `docs/SEND_RUNBOOK.md`)          |
+| `npm run dev -- email export-eml <id>`    | Exporta um rascunho local `.eml` (sem enviar nada; veja `docs/EMAIL.md`)                  |
+| `npm run build` / `start`                 | Compila para `dist/` e executa a versão compilada                                         |
+| `npm test`                                | Testes (Vitest)                                                                           |
+| `npm run typecheck`                       | Verificação de tipos (TypeScript strict)                                                  |
+| `npm run lint`                            | ESLint                                                                                    |
+| `npm run format`                          | Prettier                                                                                  |
 
 ## Currículos em PDF (fluxo estrito)
 

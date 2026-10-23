@@ -245,7 +245,7 @@ describe('idempotência, atualização e histórico', () => {
     const history = getHistory(db, applicationId);
     expect(history.map((e) => e.reason)).toEqual([
       'candidatura criada em dry-run (nada é enviado)',
-      'rascunho gerado (gerador v1); nada foi enviado',
+      'rascunho gerado (gerador v2); nada foi enviado',
     ]);
     expect(history.map((e) => e.toStatus)).toEqual(['preparada', 'preparada']);
     expect(getApplication(db, applicationId)?.appliedAt).toBeNull();

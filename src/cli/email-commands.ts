@@ -9,8 +9,10 @@ import {
   TokenStore,
   approveForSending,
   authorizeSend,
+  buildFinalPreview,
   dryRunEmail,
   exportEml,
+  formatFinalPreview,
   extractEmails,
   isFreemail,
   listDispatches,
@@ -66,7 +68,7 @@ function lazyTransport(config: AppConfig): MailTransport {
   };
 }
 
-function buildContext(db: Db, config: AppConfig, profile: Profile): EmailContext {
+export function buildContext(db: Db, config: AppConfig, profile: Profile): EmailContext {
   return {
     db,
     profile,
@@ -82,7 +84,7 @@ function buildContext(db: Db, config: AppConfig, profile: Profile): EmailContext
  * com vínculo aprovado, o PDF é regenerado e validado em memória (exige --ancora-sha256). Se a
  * resolução falhar, o motivo é mostrado e o preflight bloqueia: nunca há fallback para o mestre.
  */
-async function contextWithAttachment(
+export async function contextWithAttachment(
   db: Db,
   config: AppConfig,
   applicationId: number,
@@ -105,7 +107,7 @@ const ANCHOR_OPTION = '--ancora-sha256 <hash>';
 const ANCHOR_HELP =
   'SHA-256 do arquivo de âncora (necessário só se a candidatura tem vínculo de currículo aprovado)';
 
-function loadApproved(config: AppConfig): Profile {
+export function loadApproved(config: AppConfig): Profile {
   const profile = loadProfile(config.profilePath);
   if (profile === undefined) throw new Error('Perfil não encontrado.');
   if (profile.approval === undefined)
@@ -348,6 +350,25 @@ export function registerEmailCommands(
     });
 
   email
+    .command('preview-final <id>')
+    .description(
+      'Prévia final do envio REAL para revisão humana (destinatário completo, corpo, anexo e código de confirmação). Não envia nem grava nada',
+    )
+    .option(ANCHOR_OPTION, ANCHOR_HELP)
+    .action(async (id: string, options: { ancoraSha256?: string }) => {
+      const config = loadConfig();
+      // Sem opção --json de propósito: o endereço completo e o corpo são só para o terminal.
+      const preview = await withDbAsync(async (db) =>
+        buildFinalPreview(
+          await contextWithAttachment(db, config, parseId(id), options.ancoraSha256),
+          parseId(id),
+        ),
+      );
+      console.log(formatFinalPreview(preview));
+      if (!preview.ok) process.exitCode = 1;
+    });
+
+  email
     .command('export-eml <id>')
     .description(
       'Exporta um rascunho LOCAL (.eml) com o anexo correto. NÃO envia, não chama o Gmail e não muda o estado',
@@ -404,11 +425,21 @@ export function registerEmailCommands(
     )
     .option('--test', 'autoriza o envio de TESTE para a sua caixa')
     .option('--ttl-min <min>', 'validade em minutos (1 a 240)', '30')
+    .option(
+      '--confirm <codigo>',
+      'código de confirmação mostrado por "email preview-final" (obrigatório no envio real)',
+    )
     .option(ANCHOR_OPTION, ANCHOR_HELP)
     .action(
       async (
         id: string,
-        options: { reason: string; test?: boolean; ttlMin: string; ancoraSha256?: string },
+        options: {
+          reason: string;
+          test?: boolean;
+          ttlMin: string;
+          confirm?: string;
+          ancoraSha256?: string;
+        },
       ) => {
         const config = loadConfig();
         const authorization = await withDbAsync(async (db) =>
@@ -418,6 +449,7 @@ export function registerEmailCommands(
             kindOf(options.test),
             options.reason,
             Number(options.ttlMin),
+            options.confirm,
           ),
         );
         console.log(

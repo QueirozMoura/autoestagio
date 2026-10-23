@@ -57,7 +57,8 @@ try {
       sendEnabled: true,
       maxPerDay: 10,
       readCv: () => CV_BYTES,
-      now: () => NOW,
+      // args[3]: deslocamento opcional do relógio, em minutos (cenários de limites de tempo).
+      now: () => new Date(NOW.getTime() + Number(args[3] ?? 0) * 60_000),
       transport: {
         send: () => {
           appendFileSync(logFile, `saiu pid=${process.pid}\n`);

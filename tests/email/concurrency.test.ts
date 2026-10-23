@@ -6,10 +6,10 @@ import { promisify } from 'node:util';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { getApplication } from '../../src/applications/index.js';
 import { openDatabase, runMigrations, type Db } from '../../src/db/index.js';
-import { authorizeSend, recoverEmailDispatches } from '../../src/email/index.js';
+import { recoverEmailDispatches } from '../../src/email/index.js';
 import { PROJECT_ROOT } from '../../src/utils/paths.js';
 import { NOW } from '../helpers/eligibility.js';
-import { setupApproved, type Setup } from '../helpers/email.js';
+import { authorizeConfirmed, setupApproved, type Setup } from '../helpers/email.js';
 
 const run = promisify(execFile);
 const WORKER = join(PROJECT_ROOT, 'tests', 'helpers', 'application-worker.ts');
@@ -63,7 +63,7 @@ const sentLines = (): number =>
 describe('envio concorrente (vários processos, mesmo arquivo SQLite, Gmail simulado)', () => {
   it('N processos com N autorizações válidas: exatamente UM e-mail sai', async () => {
     const authorizations = Array.from({ length: PROCESSES }, () =>
-      authorizeSend(setup.ctx, setup.applicationId, 'real', 'teste de concorrência'),
+      authorizeConfirmed(setup.ctx, setup.applicationId, 'real', 'teste de concorrência'),
     );
     const results = await Promise.all(
       authorizations.map((auth) => child('email-send', setup.applicationId, auth.id, logFile)),
@@ -85,8 +85,8 @@ describe('envio concorrente (vários processos, mesmo arquivo SQLite, Gmail simu
   }, 120_000);
 
   it('processo que cai logo depois de o Gmail aceitar: resultado desconhecido, recuperação, e NENHUM reenvio', async () => {
-    const first = authorizeSend(setup.ctx, setup.applicationId, 'real', 'primeira');
-    const second = authorizeSend(setup.ctx, setup.applicationId, 'real', 'segunda');
+    const first = authorizeConfirmed(setup.ctx, setup.applicationId, 'real', 'primeira');
+    const second = authorizeConfirmed(setup.ctx, setup.applicationId, 'real', 'segunda');
 
     const crashed = await child('email-send-crash', setup.applicationId, first.id, logFile);
     expect(crashed.crashed).toBe(true);

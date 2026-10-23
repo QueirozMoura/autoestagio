@@ -96,6 +96,23 @@ export const domainOf = (email: string): string =>
   email.slice(email.lastIndexOf('@') + 1).toLowerCase();
 export const isFreemail = (email: string): boolean => FREEMAIL.has(domainOf(email));
 
+/**
+ * Identidade normalizada do destinatário, para detectar o mesmo contato por escritas diferentes:
+ * minúsculas, sem "+etiqueta" e, em Gmail, sem pontos no nome (googlemail.com = gmail.com).
+ */
+export function normalizeRecipient(email: string): string {
+  const lower = email.trim().toLowerCase();
+  const at = lower.lastIndexOf('@');
+  if (at < 1) return lower;
+  let local = lower.slice(0, at);
+  let domain = lower.slice(at + 1);
+  const plus = local.indexOf('+');
+  if (plus > 0) local = local.slice(0, plus);
+  if (domain === 'googlemail.com') domain = 'gmail.com';
+  if (domain === 'gmail.com') local = local.replace(/\./gu, '');
+  return `${local}@${domain}`;
+}
+
 export function maskEmail(email: string): string {
   const at = email.indexOf('@');
   return `${email.slice(0, 1)}***${email.slice(at)}`;

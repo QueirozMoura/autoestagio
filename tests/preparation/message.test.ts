@@ -21,7 +21,7 @@ const draft = (j = job(), p = profile()) =>
   generateDraft({ profile: p, job: j, cvLabel: 'Curriculo_Ficticio.pdf', now: NOW });
 
 describe('generateDraft', () => {
-  it('personaliza com vaga, empresa e dados do perfil aprovado, e cita o currículo anexo', () => {
+  it('personaliza com vaga, empresa e dados do perfil aprovado, e cita o currículo anexo sem o nome do arquivo', () => {
     const { subject, body } = draft();
     expect(subject).toBe('Candidatura - Estágio em Desenvolvimento Backend - Pessoa Exemplo');
     expect(body).toContain('Olá, equipe Acme Tech,');
@@ -31,7 +31,10 @@ describe('generateDraft', () => {
     expect(body).toContain(
       'Estou cursando Análise e Desenvolvimento de Sistemas (tecnólogo) na Faculdade Exemplo, atualmente no 3º semestre, com previsão de conclusão em 2028.',
     );
-    expect(body).toContain('Curriculo_Ficticio.pdf');
+    // O texto não cita o nome do arquivo do mestre: o anexo efetivo pode ser outro (vínculo).
+    expect(body).toContain('Segue meu currículo em anexo.');
+    expect(body).not.toContain('Curriculo_Ficticio.pdf');
+    expect(body).not.toMatch(/\.pdf/u);
     expect(body.endsWith('Atenciosamente,\nPessoa Exemplo')).toBe(true);
   });
 

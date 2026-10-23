@@ -17,7 +17,7 @@ import { profileHash as hashProfile } from '../eligibility/index.js';
 import { answerRequirement, computeReadiness, getDraftRecord } from '../preparation/index.js';
 import type { MailTransport, SendOutcome } from './gmail.js';
 import { buildMime, isValidEmail, newMessageId, toBase64Url } from './mime.js';
-import { maskEmail, usableRecipient } from './recipients.js';
+import { maskEmail, normalizeRecipient, usableRecipient } from './recipients.js';
 
 export class EmailError extends Error {
   constructor(
@@ -33,6 +33,17 @@ export type DispatchKind = 'real' | 'teste';
 
 export const MAX_ATTACHMENT_BYTES = 5 * 1024 * 1024;
 export const AUTHORIZATION_TTL_MIN = 30;
+/** Intervalo mínimo entre envios reais (qualquer candidatura). */
+export const MIN_INTERVAL_MIN = 15;
+/** Janela em que o mesmo destinatário não pode receber de candidaturas diferentes. */
+export const REPEAT_RECIPIENT_DAYS = 30;
+
+/**
+ * Código de confirmação de 8 caracteres exibido por `email preview-final`. Deriva do bindingHash do envio REAL
+ * (candidatura, conteúdo, anexo/vínculo e destinatário), sem expô-lo. Não substitui a autorização de uso único.
+ */
+export const confirmationCode = (bindingHash: string): string =>
+  createHash('sha256').update(`confirmacao-envio-v1|${bindingHash}`).digest('hex').slice(0, 8);
 
 /** Tudo de que o envio depende. Injetável: os testes usam um Gmail simulado e um PDF fictício. */
 export interface EmailContext {
@@ -53,6 +64,8 @@ export interface EmailContext {
    */
   attachment?: ResolvedAttachment | undefined;
   now?: () => Date;
+  /** Só para testes de concorrência: executa logo antes da reserva atômica do envio. */
+  beforeReserve?: () => void | Promise<void>;
 }
 
 const sha256 = (data: Buffer | string): string => createHash('sha256').update(data).digest('hex');
@@ -73,13 +86,22 @@ export interface Check {
   detail: string;
   /** Verificações que só valem para o envio de fato (ex.: trava mestra). */
   sendOnly?: boolean;
+  /**
+   * Portões de autorização/envio (teste prévio, intervalo, destinatário repetido): não impedem montar a mensagem,
+   * aprovar ou exportar, mas bloqueiam `authorize` e `send` (envio real).
+   */
+  gate?: boolean;
 }
 
 export interface Preflight {
   checks: Check[];
-  /** Tudo certo, exceto (talvez) a trava mestra. */
+  /** Tudo certo, exceto (talvez) a trava mestra e os portões de envio. */
   ok: boolean;
-  /** Tudo certo, inclusive a trava mestra: o envio pode ser feito. */
+  /** Portões de envio real (teste prévio, intervalo, destinatário repetido) satisfeitos. */
+  gatesOk: boolean;
+  /** `ok` e portões satisfeitos: uma autorização pode ser criada. */
+  authorizable: boolean;
+  /** Tudo certo, inclusive portões e trava mestra: o envio pode ser feito. */
   sendReady: boolean;
   /** Presente quando dá para montar a mensagem. */
   plan?: SendPlan;
@@ -96,6 +118,8 @@ interface SendPlan {
   cvBytes: Buffer;
   cvSha256: string;
   cvName: string;
+  /** No teste: o bindingHash do envio REAL equivalente (evidência persistida). */
+  intendedBindingHash?: string;
   /** `mestre`: candidatura sem vínculo; `personalizado`: vínculo de currículo aprovado. */
   attachmentSource: 'mestre' | 'personalizado';
   attachmentVariant: string | null;
@@ -139,11 +163,148 @@ export function bindingHashOf(parts: {
   );
 }
 
+/** Validade da evidência de teste. */
+export const TEST_EVIDENCE_MAX_HOURS = 24;
+/** Tolerância a relógio adiantado entre processos/ajustes de hora; além disso a evidência é tratada como inválida. */
+export const TEST_EVIDENCE_FUTURE_TOLERANCE_MIN = 2;
+
+interface RealLimitsInput {
+  db: Db;
+  now: Date;
+  applicationId: number;
+  jobId: number;
+  recipient: string | undefined;
+  realBinding: string | undefined;
+  maxPerDay: number;
+}
+
+/**
+ * Limites e portões do envio REAL. Usada no preflight E, dentro da transação imediata, na reserva do envio:
+ * duas execuções simultâneas não passam juntas por limites globais ou de destinatário, pois a reserva
+ * (BEGIN IMMEDIATE) serializa os escritores e a segunda enxerga a primeira já gravada. Só leitura.
+ */
+function evaluateRealLimits(input: RealLimitsInput): Check[] {
+  const { db, now, applicationId, jobId, recipient, realBinding, maxPerDay } = input;
+  const checks: Check[] = [];
+  const add = (id: string, ok: boolean, detail: string, gate = false): void => {
+    checks.push({ id, ok, detail, ...(gate ? { gate: true } : {}) });
+  };
+
+  // Nenhum envio real anterior (ou possível) para esta vaga nem para vagas equivalentes.
+  const active = db
+    .prepare(
+      "SELECT COUNT(*) AS n FROM email_dispatches WHERE application_id = ? AND kind = 'real' AND status IN ('reservado','aceito','desconhecido')",
+    )
+    .get(applicationId) as { n: number };
+  const equivalentSent = alreadySentEquivalent(findEquivalent(db, jobId));
+  add(
+    'sem_envio_anterior',
+    active.n === 0 && equivalentSent === undefined,
+    active.n > 0
+      ? 'já existe envio real aceito, em andamento ou com resultado desconhecido: não será reenviado'
+      : equivalentSent === undefined
+        ? 'nenhum envio anterior'
+        : `vaga equivalente já enviada (candidatura ${equivalentSent.applicationId})`,
+  );
+
+  const since = new Date(now.getTime() - 24 * 3_600_000).toISOString();
+  const today = (
+    db
+      .prepare(
+        "SELECT COUNT(*) AS n FROM email_dispatches WHERE kind = 'real' AND reserved_at >= ?",
+      )
+      .get(since) as { n: number }
+  ).n;
+  add(
+    'limite_diario',
+    today < maxPerDay,
+    `${today} envios reais nas últimas 24 h (limite ${maxPerDay})`,
+  );
+
+  // Teste prévio: aceito, para exatamente este envio real, e com até 24 h (horário persistido do despacho).
+  const rows =
+    realBinding === undefined
+      ? []
+      : (db
+          .prepare(
+            "SELECT COALESCE(finished_at, reserved_at) AS at FROM email_dispatches WHERE application_id = ? AND kind = 'teste' AND status = 'aceito' AND intended_binding_hash = ?",
+          )
+          .all(applicationId, realBinding) as { at: string }[]);
+  let fresh = false;
+  let expired = false;
+  let invalid = false;
+  for (const row of rows) {
+    const at = Date.parse(row.at);
+    if (!Number.isFinite(at)) invalid = true;
+    else if (at - now.getTime() > TEST_EVIDENCE_FUTURE_TOLERANCE_MIN * 60_000) invalid = true;
+    else if (now.getTime() - at > TEST_EVIDENCE_MAX_HOURS * 3_600_000) expired = true;
+    else fresh = true;
+  }
+  add(
+    'teste_previo',
+    fresh,
+    fresh
+      ? `há um envio de teste aceito, de até ${TEST_EVIDENCE_MAX_HOURS} h, para exatamente este conteúdo, anexo e destinatário`
+      : rows.length === 0
+        ? 'nenhum envio de teste aceito corresponde ao conteúdo, ao anexo e ao destinatário atuais (dry-run e .eml não contam): faça "email authorize --test" e "email send --test"'
+        : invalid && !expired
+          ? 'o teste correspondente tem horário inválido ou no futuro: refaça o envio de teste'
+          : `o teste correspondente tem mais de ${TEST_EVIDENCE_MAX_HOURS} h: refaça o envio de teste`,
+    true,
+  );
+
+  const intervalStart = new Date(now.getTime() - MIN_INTERVAL_MIN * 60_000).toISOString();
+  const recent = db
+    .prepare(
+      "SELECT MAX(reserved_at) AS last FROM email_dispatches WHERE kind = 'real' AND status IN ('reservado', 'aceito', 'desconhecido') AND reserved_at > ?",
+    )
+    .get(intervalStart) as { last: string | null };
+  add(
+    'intervalo_minimo',
+    recent.last === null,
+    recent.last === null
+      ? `nenhum envio real nos últimos ${MIN_INTERVAL_MIN} min`
+      : `houve um envio real (ou de resultado incerto) há menos de ${MIN_INTERVAL_MIN} min; aguarde`,
+    true,
+  );
+
+  const repeatStart = new Date(
+    now.getTime() - REPEAT_RECIPIENT_DAYS * 24 * 3_600_000,
+  ).toISOString();
+  const previous =
+    recipient === undefined
+      ? []
+      : (
+          db
+            .prepare(
+              `SELECT v.email AS email FROM email_dispatches d JOIN verified_recipients v ON v.id = d.recipient_id
+                WHERE d.kind = 'real' AND d.status IN ('reservado', 'aceito', 'desconhecido')
+                  AND d.application_id <> ? AND d.reserved_at > ?`,
+            )
+            .all(applicationId, repeatStart) as { email: string }[]
+        ).filter((row) => normalizeRecipient(row.email) === normalizeRecipient(recipient));
+  add(
+    'destinatario_repetido',
+    previous.length === 0,
+    previous.length === 0
+      ? `este destinatário não recebeu envio real de outra candidatura nos últimos ${REPEAT_RECIPIENT_DAYS} dias`
+      : `este destinatário já recebeu (ou pode ter recebido) um envio real de outra candidatura nos últimos ${REPEAT_RECIPIENT_DAYS} dias`,
+    true,
+  );
+  return checks;
+}
+
 export function preflight(ctx: EmailContext, applicationId: number, kind: DispatchKind): Preflight {
   const { db, profile } = ctx;
   const checks: Check[] = [];
-  const add = (id: string, ok: boolean, detail: string, sendOnly = false): void => {
-    checks.push({ id, ok, detail, ...(sendOnly ? { sendOnly } : {}) });
+  const add = (id: string, ok: boolean, detail: string, flag?: 'sendOnly' | 'gate'): void => {
+    checks.push({
+      id,
+      ok,
+      detail,
+      ...(flag === 'sendOnly' ? { sendOnly: true } : {}),
+      ...(flag === 'gate' ? { gate: true } : {}),
+    });
   };
 
   const application = getApplication(db, applicationId);
@@ -156,7 +317,7 @@ export function preflight(ctx: EmailContext, applicationId: number, kind: Dispat
     ctx.sendEnabled
       ? 'EMAIL_SEND_ENABLED=true'
       : 'EMAIL_SEND_ENABLED=false (trava mestra desligada)',
-    true,
+    'sendOnly',
   );
   add(
     'perfil_aprovado',
@@ -284,6 +445,18 @@ export function preflight(ctx: EmailContext, applicationId: number, kind: Dispat
 
   // Candidatura e rascunho.
   const draft = getDraftRecord(db, applicationId);
+  /** bindingHash que o envio do tipo `forKind` teria para o destinatário `to` (anexo e conteúdo atuais). */
+  const bindingFor = (forKind: DispatchKind, to: string): string | undefined =>
+    draft === undefined || attached === undefined
+      ? undefined
+      : bindingHashOf({
+          contentHash: draft.contentHash,
+          cvSha256: attached.sha,
+          recipient: to,
+          kind: forKind,
+          applicationId,
+          ...(attached.binding === undefined ? {} : { attachment: attached.binding }),
+        });
   const currentHash = hashProfile(profile);
   const readiness = computeReadiness(db, applicationId, currentHash);
   if (kind === 'real') {
@@ -361,41 +534,25 @@ export function preflight(ctx: EmailContext, applicationId: number, kind: Dispat
     }
   }
 
-  // Nenhum envio real anterior (ou possível) para esta vaga nem para vagas equivalentes.
+  // Limites e portões do envio real: as MESMAS regras são reavaliadas, de forma atômica, na reserva do envio.
   if (kind === 'real') {
-    const active = db
-      .prepare(
-        "SELECT COUNT(*) AS n FROM email_dispatches WHERE application_id = ? AND kind = 'real' AND status IN ('reservado','aceito','desconhecido')",
-      )
-      .get(applicationId) as { n: number };
-    const equivalentSent = alreadySentEquivalent(findEquivalent(db, application.jobId));
-    add(
-      'sem_envio_anterior',
-      active.n === 0 && equivalentSent === undefined,
-      active.n > 0
-        ? 'já existe envio real aceito, em andamento ou com resultado desconhecido: não será reenviado'
-        : equivalentSent === undefined
-          ? 'nenhum envio anterior'
-          : `vaga equivalente já enviada (candidatura ${equivalentSent.applicationId})`,
-    );
-
-    const since = new Date(clock(ctx).getTime() - 24 * 3_600_000).toISOString();
-    const today = (
-      db
-        .prepare(
-          "SELECT COUNT(*) AS n FROM email_dispatches WHERE kind = 'real' AND reserved_at >= ?",
-        )
-        .get(since) as { n: number }
-    ).n;
-    add(
-      'limite_diario',
-      today < ctx.maxPerDay,
-      `${today} envios reais nas últimas 24 h (limite ${ctx.maxPerDay})`,
-    );
+    for (const check of evaluateRealLimits({
+      db,
+      now: clock(ctx),
+      applicationId,
+      jobId: application.jobId,
+      recipient,
+      realBinding: recipient === undefined ? undefined : bindingFor('real', recipient),
+      maxPerDay: ctx.maxPerDay,
+    }))
+      checks.push(check);
   }
 
   // `ok`: tudo que não depende da trava mestra. `sendReady`: inclusive a trava mestra.
-  const core = checks.filter((check) => check.sendOnly !== true).every((check) => check.ok);
+  const core = checks
+    .filter((check) => check.sendOnly !== true && check.gate !== true)
+    .every((check) => check.ok);
+  const gatesOk = checks.filter((check) => check.gate === true).every((check) => check.ok);
 
   let plan: SendPlan | undefined;
   if (core && draft !== undefined && attached !== undefined && recipient !== undefined) {
@@ -417,6 +574,13 @@ export function preflight(ctx: EmailContext, applicationId: number, kind: Dispat
       cvName: attached.name,
       attachmentSource: attached.source,
       attachmentVariant: attached.variant,
+      ...(kind === 'teste'
+        ? (() => {
+            const intended = usableRecipient(db, application.jobId);
+            const hash = intended === undefined ? undefined : bindingFor('real', intended.email);
+            return hash === undefined ? {} : { intendedBindingHash: hash };
+          })()
+        : {}),
       bindingHash: bindingHashOf({
         contentHash: draft.contentHash,
         cvSha256: attached.sha,
@@ -430,7 +594,9 @@ export function preflight(ctx: EmailContext, applicationId: number, kind: Dispat
   return {
     checks,
     ok: core,
-    sendReady: core && ctx.sendEnabled,
+    gatesOk,
+    authorizable: core && gatesOk,
+    sendReady: core && gatesOk && ctx.sendEnabled,
     ...(plan === undefined ? {} : { plan }),
   };
 }
@@ -485,7 +651,8 @@ export function approveForSending(
   }
   const result = preflight(ctx, applicationId, 'real');
   const failed = result.checks.filter(
-    (check) => !check.ok && check.sendOnly !== true && check.id !== 'estado_e_modo',
+    (check) =>
+      !check.ok && check.sendOnly !== true && check.gate !== true && check.id !== 'estado_e_modo',
   );
   if (failed.length > 0) {
     throw new EmailError(
@@ -606,6 +773,7 @@ export function authorizeSend(
   kind: DispatchKind,
   reason: string,
   ttlMinutes: number = AUTHORIZATION_TTL_MIN,
+  confirmation?: string,
 ): Authorization {
   if (reason.trim() === '')
     throw new EmailError('entrada_invalida', 'informe o motivo/confirmação da autorização');
@@ -613,13 +781,25 @@ export function authorizeSend(
     throw new EmailError('entrada_invalida', 'a validade deve ficar entre 1 e 240 minutos');
   }
   const result = preflight(ctx, applicationId, kind);
-  if (!result.ok || result.plan === undefined) {
+  if (!result.authorizable || result.plan === undefined) {
     const failed = result.checks
       .filter((check) => !check.ok && check.sendOnly !== true)
       .map((check) => check.id);
     throw new EmailError(
       'bloqueado',
       `não dá para autorizar: verificações falhando (${failed.join(', ')})`,
+    );
+  }
+  // Envio real: o código de "email preview-final" precisa corresponder ao conteúdo ATUAL
+  // (destinatário, corpo, anexo e vínculo). Não substitui a autorização de uso único nem as demais travas.
+  if (
+    kind === 'real' &&
+    (confirmation === undefined ||
+      confirmation.trim().toLowerCase() !== confirmationCode(result.plan.bindingHash))
+  ) {
+    throw new EmailError(
+      'autorizacao',
+      'código de confirmação ausente ou diferente do conteúdo atual; rode "email preview-final" e confira a mensagem',
     );
   }
   const now = clock(ctx);
@@ -688,6 +868,7 @@ export async function sendEmail(
   const rfcMessageId = newMessageId();
   const startedAt = clock(ctx);
 
+  await ctx.beforeReserve?.();
   // 1) Reserva atômica: consome a autorização e grava a intenção ANTES de tocar no Gmail.
   const dispatchId = ctx.db
     .transaction((): number => {
@@ -725,6 +906,26 @@ export async function sendEmail(
           'o conteúdo, o currículo ou o destinatário mudaram depois da autorização; autorize de novo',
         );
       }
+      // Revalidação ATÓMICA dos limites e portões do envio real: o preflight acima pode estar defasado se outra
+      // execução reservou um envio nesse meio-tempo. Esta transação já detém o lock de escrita do SQLite.
+      if (kind === 'real') {
+        const failed = evaluateRealLimits({
+          db: ctx.db,
+          now: startedAt,
+          applicationId,
+          jobId: plan.application.jobId,
+          recipient: plan.recipient,
+          realBinding: plan.bindingHash,
+          maxPerDay: ctx.maxPerDay,
+        })
+          .filter((check) => !check.ok)
+          .map((check) => check.id);
+        if (failed.length > 0)
+          throw new EmailError(
+            'bloqueado',
+            `envio bloqueado na reserva: verificações falhando (${failed.join(', ')})`,
+          );
+      }
       ctx.db
         .prepare('UPDATE email_authorizations SET used_at = ? WHERE id = ?')
         .run(startedAt.toISOString(), authorizationId);
@@ -733,8 +934,8 @@ export async function sendEmail(
         ctx.db
           .prepare(
             `INSERT INTO email_dispatches (application_id, kind, recipient_id, recipient_masked, status, rfc_message_id,
-               cv_sha256, content_hash, authorization_id, reserved_at)
-             VALUES (?, ?, ?, ?, 'reservado', ?, ?, ?, ?, ?)`,
+               cv_sha256, content_hash, authorization_id, reserved_at, intended_binding_hash)
+             VALUES (?, ?, ?, ?, 'reservado', ?, ?, ?, ?, ?, ?)`,
           )
           .run(
             applicationId,
@@ -746,6 +947,7 @@ export async function sendEmail(
             plan.contentHash,
             authorizationId,
             startedAt.toISOString(),
+            kind === 'teste' ? (plan.intendedBindingHash ?? null) : null,
           ).lastInsertRowid,
       );
       if (kind === 'real') {
