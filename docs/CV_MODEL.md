@@ -232,6 +232,39 @@ vai **exigi-las**. Sem elas, o H6 segue só estrutural e o relatório diz `fontI
 - **Acoplamento:** a identidade byte a byte de `fpgm`/`prep`/`cvt ` e dos glifos simples é um fato medido da versão atual
   do PDFKit; uma atualização que mude o subsetting faz a validação dos PDFs reais falhar (falha fechada).
 
+### Entrega 2b-ii-b2: identidade dos compostos, vazios e Unicode
+
+Com `referenceFonts`, o H6 agora compara também os compostos e vincula os glifos aos caracteres. Os bytes continuam
+em memória; o validador não lê o modelo mestre nem abre as fontes. **`complete` continua sempre `false`**, pois a
+integração 2c permanece pendente. Referências continuam opcionais nesta API; sem elas, `not-supplied`.
+
+- **Compostos:** assinatura SHA-256 recursiva inclui todos os bytes, argumentos, flags, transformações, instruções,
+  padding e métricas `hmtx` do pai e dos filhos. Só os dois bytes do índice de cada componente são normalizados;
+  em seu lugar entram assinaturas de tamanho fixo dos filhos, na mesma ordem. Isto corresponde à reindexação
+  medida no PDFKit/fontkit atual. Mudanças em qualquer outro byte falham; ciclos, flags reservadas/conflitantes e
+  dados truncados são recusados. A travessia é memoizada, sem expandir árvores em memória.
+- **Limites da prova, por fonte:** 6.000 glifos, 2 MiB de programa, profundidade 8, 64 componentes por glifo e
+  100.000 arestas/candidatos examinados. O leitor estrutural também interrompe travessias excessivas durante a
+  leitura, antes de chamar a prova. As defesas de `hmtx` da b1 permanecem e fontes com erros estruturais não entram
+  no comparador. Violações retornam reprovação controlada do H6, sem mascarar erros inesperados.
+- **`reference-cmap.ts`:** lê mapas Unicode formatos 4 (`idDelta` e `idRangeOffset`) e 12 (inclusive caracteres
+  suplementares); verifica offsets, comprimentos, ordem, cobertura, índices em `maxp` e conflitos entre subtabelas.
+  Limites: 32 registros, 8.192 segmentos/grupos, 65.536 entradas e 262.144 operações. Outros formatos Unicode
+  falham explicitamente. O mapa Macintosh não é usado para provar Unicode. As Lato versionadas usam formato 4.
+- **Desenho × Unicode:** cada entrada declarada de `ToUnicode` (exceto `.notdef → U+0000`) precisa representar um
+  único escalar coberto pelo `cmap` da referência e apontar para um candidato com identidade comprovada. Todo CID
+  desenhado precisa estar nesse mapa e no programa. Desenhar A e declarar B reprova mesmo que os extratores concordem.
+  Glifos que só compõem outros glifos não precisam ter `ToUnicode`, mas sua identidade também é comprovada.
+  CIDs repetidos no `ToUnicode` (inclusive sobreposição entre `bfchar` e `bfrange`) são recusados, sem sobrescrever
+  silenciosamente o valor anterior.
+- **Vazios e ambiguidades:** vazio não é aceito apenas por largura plausível; sua assinatura e o Unicode usado
+  precisam conferir. `.notdef` precisa ser o glifo 0 original e nunca pode ser desenhado. Candidatos duplicados são
+  resolvidos pelo `cmap` quando possível; ambiguidades restantes, ou análise de uso incompleta, mantêm `partial`.
+- **Relatório:** `verified` exige todas as provas sem erro ou pendência; inclui contagens `compositeMatched`,
+  `emptyMatched`, `unicodeMatched` e pendências por fonte. Divergências resultam em `failed`. `verified` comprova
+  identidade **relativa aos bytes de referência confiáveis fornecidos pelo chamador**, não autentica a procedência
+  desses bytes e não equivale a concluir a validação integrada 2c ou a garantir aceitação por um ATS.
+
 ## Relatório de fidelidade
 
 Compara o modelo com o PDF por métodos independentes da leitura estrutural:

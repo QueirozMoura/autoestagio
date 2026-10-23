@@ -75,6 +75,7 @@ export {
 export {
   PENDING_B1,
   PROVEN_B1,
+  PROVEN_B2,
   REFERENCE_NAMES,
   checkFontIdentity,
   identityReport,
@@ -178,15 +179,14 @@ export interface ValidationReport {
   /** Todas as verificações IMPLEMENTADAS passaram. */
   ok: boolean;
   /**
-   * Sempre `false` aqui: a conferência dos glifos com a fonte original e da forma com o Unicode (2b-ii-b) e a
-   * integração final (2c) ainda não existem.
+   * Sempre `false` aqui: a integração final (2c) ainda está pendente, mesmo com identidade verificada.
    */
   complete: false;
   /** Um `ForbiddenSet` foi informado (sem ele, o H5 só confere texto inválido). */
   forbiddenProvided: boolean;
   /**
-   * Identidade dos glifos com a Lato original. Na 2b-ii-b1 o melhor resultado é `partial`: os glifos compostos
-   * e a coerência com o Unicode só serão provados na 2b-ii-b2. `partial` NUNCA equivale a validação completa.
+   * Identidade com a referência Lato: `verified` exige compostos, vazios e Unicode comprovados.
+   * Ausência de dados ou ambiguidades mantém `partial`. Isto não conclui a integração 2c.
    */
   fontIdentity: FontIdentityReport;
   implemented: CheckId[];

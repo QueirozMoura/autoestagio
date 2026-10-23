@@ -116,6 +116,45 @@ describe('métricas TrueType: acesso defensivo', () => {
 });
 
 describe('leitor TrueType: diretório e tabelas (falha fechada)', () => {
+  it('cabeçalho truncado não permite leitura mesmo com minBytes reduzido pelo chamador', () => {
+    for (let length = 0; length < 12; length++) {
+      const reading = readTrueType(Buffer.alloc(length), { minBytes: 0 });
+      expect(reading.font).toBeUndefined();
+      expect(reading.problems.join(' ')).toMatch(/pequeno demais/);
+    }
+  });
+  it('interrompe uma cadeia longa de compostos durante a leitura, mesmo com limites ampliados', () => {
+    const count = 1000;
+    const chained = mutateTtf(program, (parts) => {
+      const glyphs = Array.from({ length: count }, (_, gid) => {
+        const bytes = Buffer.alloc(gid === count - 1 ? 12 : 16);
+        if (gid !== count - 1) {
+          bytes.writeInt16BE(-1, 0);
+          bytes.writeUInt16BE(2, 10);
+          bytes.writeUInt16BE(gid + 1, 12);
+        }
+        return bytes;
+      });
+      const loca = Buffer.alloc((count + 1) * 4);
+      let offset = 0;
+      glyphs.forEach((glyph, gid) => {
+        loca.writeUInt32BE(offset, gid * 4);
+        offset += glyph.length;
+      });
+      loca.writeUInt32BE(offset, count * 4);
+      const maxp = parts.tables.get('maxp');
+      const hhea = parts.tables.get('hhea');
+      if (maxp === undefined || hhea === undefined) throw new Error('sem tabelas');
+      maxp.writeUInt16BE(count, 4);
+      hhea.writeUInt16BE(count, 34);
+      parts.tables.set('glyf', Buffer.concat(glyphs));
+      parts.tables.set('loca', loca);
+      parts.tables.set('hmtx', Buffer.alloc(count * 4));
+    });
+    expect(problems(chained, { maxCompositeDepth: 10_000 })).toMatch(
+      /limite de profundidade\/processamento/,
+    );
+  });
   it('tamanho: pequeno demais e grande demais (a fonte completa não passa)', () => {
     expect(problems(program.subarray(0, 600))).toMatch(/pequeno demais/);
     expect(problems(Buffer.concat([program, Buffer.alloc(300 * 1024)]))).toMatch(

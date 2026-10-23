@@ -100,7 +100,7 @@ const flip = (program: Buffer, at: number): Buffer => {
 };
 
 describe('2b-ii-b1: identidade com a Lato original (positivos)', () => {
-  it('os PDFs do renderizador passam no H6 com identidade PARCIAL, nunca verificada', async () => {
+  it('os PDFs do renderizador passam no H6 com identidade verificada, sem completar a 2c', async () => {
     const report = await validateRenderedPdf(bytes, resume, {
       poppler: 'off',
       referenceFonts: references,
@@ -108,12 +108,11 @@ describe('2b-ii-b1: identidade com a Lato original (positivos)', () => {
     expect(check(report, 'H6').status, check(report, 'H6').details.join('\n')).toBe('pass');
     expect(report.ok).toBe(true);
     expect(report.complete).toBe(false);
-    expect(report.fontIdentity.status).toBe('partial');
-    expect(report.fontIdentity.pending.join(' ')).toMatch(/compostos/);
-    expect(report.fontIdentity.pending.join(' ')).toMatch(/ToUnicode/);
+    expect(report.fontIdentity.status).toBe('verified');
+    expect(report.fontIdentity.pending).toEqual([]);
     expect(report.fontIdentity.proven.join(' ')).toMatch(/fpgm, prep e cvt/);
     expect(check(report, 'H6').details.join('\n')).toMatch(
-      /identidade com a Lato original: PARCIAL/,
+      /identidade com a Lato original: VERIFICADA/,
     );
   });
 
@@ -127,8 +126,11 @@ describe('2b-ii-b1: identidade com a Lato original (positivos)', () => {
     for (const f of fonts) {
       expect(f.tablesIdentical).toBe(true);
       expect(f.simpleMatched).toBeGreaterThan(20);
-      expect(f.composite).toBeGreaterThan(0); // compostos NÃO são comprovados nesta versão
+      expect(f.composite).toBeGreaterThan(0); // compostos existem no fixture
       expect(f.simpleMatched + f.composite + f.empty).toBe(f.glyphs);
+      expect(f.compositeMatched).toBe(f.composite);
+      expect(f.emptyMatched).toBe(f.empty);
+      expect(f.verified).toBe(true);
     }
   });
 
@@ -179,7 +181,7 @@ describe('2b-ii-b1: adulteração das fontes do PDF (negativos)', () => {
   it('o PDF sintético sem adulteração passa', () => {
     const { h6, identity } = identityOf(regular);
     expect(h6.status, h6.details.join('\n')).toBe('pass');
-    expect(identity.status).toBe('partial');
+    expect(identity.status).toBe('verified');
   });
 
   it.each([

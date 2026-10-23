@@ -30,9 +30,8 @@ import {
  * H6 — fontes embutidas, subconjuntos, programas TrueType e cobertura do ToUnicode.
  * H7 — ligaduras e mapeamentos Unicode compostos ou inválidos.
  *
- * Entrega 2b-ii-a: a verificação é ESTRUTURAL e de cobertura. A comparação do programa com a fonte original
- * (identidade dos glifos, bytecode) e a coerência entre a forma do glifo e o Unicode declarado ficam para a
- * 2b-ii-b: por isso este H6 sozinho não prova que os glifos são os da Lato.
+ * Com referências confiáveis, a b2 prova também a identidade recursiva e a coerência com o Unicode.
+ * Sem referências, o H6 permanece estrutural e de cobertura. A integração 2c segue pendente.
  */
 
 /** Padrão do nome de uma fonte em subconjunto da Lato, como o PDFKit a nomeia. */
@@ -242,6 +241,7 @@ export function checkFonts(input: FontsInput): FontsReading {
   if (fonts.length === 0) problems.push('o PDF não declara nenhuma fonte nos recursos das páginas');
 
   for (const font of fonts) {
+    const beforeFontProblems = problems.length;
     const label = `fonte ${font.baseFont ?? `(objeto ${font.objectNum})`}`;
     if (font.subtype !== 'Type0')
       problems.push(`${label}: /Subtype /${font.subtype ?? '?'} em vez de /Type0`);
@@ -279,26 +279,55 @@ export function checkFonts(input: FontsInput): FontsReading {
     if (font.programError !== undefined)
       problems.push(`${label}: programa ilegível (${font.programError})`);
     for (const p of font.truetype?.problems ?? []) problems.push(`${label}: ${p}`);
-    if (input.references !== undefined) {
-      // O leitor pode devolver uma estrutura parcial junto dos erros. Ela não serve para provar identidade.
-      const validFont = font.truetype?.problems.length === 0 ? font.truetype.font : undefined;
-      const identity = checkFontIdentity(font.baseFont, validFont, input.references);
-      identityFonts.push(identity.summary);
-      for (const p of identity.problems) identityProblems.push(`${label}: identidade: ${p}`);
-    }
-
     if (!font.hasToUnicode) problems.push(`${label}: sem /ToUnicode`);
     else if (font.toUnicodeError !== undefined)
       problems.push(`${label}: ToUnicode ilegível (${font.toUnicodeError})`);
+    if (input.references !== undefined) {
+      // O leitor pode devolver uma estrutura parcial junto dos erros. Ela não serve para provar identidade.
+      const validFont =
+        problems.length === beforeFontProblems && font.truetype?.problems.length === 0
+          ? font.truetype.font
+          : undefined;
+      const used = new Set<number>();
+      for (const page of pages) {
+        const resources = dictOf(structure, page.node.resources?.map.get('Font'));
+        for (const [name, cids] of page.analysis?.usage ?? []) {
+          const ref = resources?.map.get(name);
+          if (isRef(ref) && ref.num === font.objectNum) for (const cid of cids) used.add(cid);
+        }
+      }
+      const identity = checkFontIdentity(font.baseFont, validFont, input.references, {
+        ...(font.toUnicode === undefined ? {} : { toUnicode: font.toUnicode }),
+        used,
+        usageComplete:
+          pages.length > 0 &&
+          pages.every(
+            (page) =>
+              page.contentProblems.length === 0 &&
+              page.fontProblems.length === 0 &&
+              page.analysis !== undefined &&
+              page.analysis.problems.length === 0,
+          ),
+      });
+      identityFonts.push(identity.summary);
+      for (const p of identity.problems) identityProblems.push(`${label}: identidade: ${p}`);
+    }
   }
 
-  problems.push(...identityProblems);
   if (input.references !== undefined && fonts.length === 0)
     identityProblems.push('nenhuma fonte do PDF para comparar com as referências');
+  problems.push(...identityProblems);
   const identity =
     input.references === undefined
       ? identityReport('not-supplied')
-      : identityReport(identityProblems.length > 0 ? 'failed' : 'partial', identityFonts);
+      : identityReport(
+          identityProblems.length > 0
+            ? 'failed'
+            : identityFonts.every((f) => f.verified)
+              ? 'verified'
+              : 'partial',
+          identityFonts,
+        );
   if (identity.status === 'not-supplied')
     notes.push(
       'referências de fonte não informadas: a identidade dos glifos com a Lato original NÃO foi verificada',
@@ -308,9 +337,13 @@ export function checkFonts(input: FontsInput): FontsReading {
       `identidade com a Lato original: PARCIAL (${identityFonts
         .map(
           (f) =>
-            `${f.variant ?? f.font}: ${f.simpleMatched} simples comprovados, ${f.composite} compostos e ${f.empty} vazios não comprovados`,
+            `${f.variant ?? f.font}: ${f.simpleMatched} simples comprovados, ${f.compositeMatched}/${f.composite} compostos e ${f.emptyMatched}/${f.empty} vazios comprovados`,
         )
-        .join('; ')}); compostos e coerência com o Unicode ficam para a 2b-ii-b2`,
+        .join('; ')}); pendências: ${identity.pending.join('; ')}`,
+    );
+  else if (identity.status === 'verified')
+    notes.push(
+      'identidade com a Lato original: VERIFICADA (compostos, vazios, métricas e ToUnicode)',
     );
 
   // Cobertura: todo glifo desenhado precisa existir no programa e ter texto no ToUnicode.

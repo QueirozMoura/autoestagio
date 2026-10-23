@@ -1,5 +1,8 @@
 import { createHash } from 'node:crypto';
 import { clip } from './checks.js';
+import type { CMap } from './cmap.js';
+import { FontProofError, glyphSignatures } from './glyph-signatures.js';
+import { referenceCmap } from './reference-cmap.js';
 import {
   glyphBytes,
   glyphMetrics,
@@ -11,19 +14,9 @@ import {
 } from './truetype.js';
 
 /**
- * Identidade dos subconjuntos de fonte do PDF com a Lato original (Etapa 4.3, fatia 2, entrega 2b-ii-b1).
- *
- * As fontes de referência chegam COMO BYTES: este módulo não abre arquivo nenhum. O que se prova aqui, medido
- * contra a saída do PDFKit:
- *  - `fpgm`, `prep` e `cvt ` são cópias byte a byte das tabelas da fonte original;
- *  - `head`, `hhea` e `maxp` são cópias exceto os campos que dependem da contagem de glifos do subconjunto
- *    (`numberOfHMetrics` e `numGlyphs`) e o formato do `loca` (estrutural, conferido pelo leitor);
- *  - cada glifo SIMPLES do subconjunto é idêntico (SHA-256) a um glifo da fonte original e tem as mesmas
- *    métricas (`hmtx`) do glifo que o comprova.
- *
- * NÃO se prova aqui (2b-ii-b2): os glifos COMPOSTOS (o PDFKit reindexa os componentes) e a coerência entre o
- * desenho e o caractere declarado em `ToUnicode`. Por isso o resultado nunca passa de `partial`: um glifo
- * composto ou vazio não comprovado é contado e listado, jamais aceito em silêncio como `verified`.
+ * Prova de identidade b2: bytes e métricas dos glifos simples/vazios e estrutura recursiva dos compostos,
+ * normalizando apenas índices de componentes reescritos pelo PDFKit. Unicode é conferido contra o cmap da
+ * referência confiável fornecida pelo chamador. Sem mapa/uso ou com ambiguidades não há `verified`.
  */
 
 export type ReferenceName = 'Lato-Regular' | 'Lato-Bold';
@@ -41,9 +34,9 @@ export type FontIdentityStatus =
   | 'not-run'
   /** Referência inválida ou alguma fonte do PDF não confere com a original. */
   | 'failed'
-  /** O que a 2b-ii-b1 prova conferiu; compostos e coerência com o Unicode ainda NÃO foram provados. */
+  /** A comparação disponível passou, mas faltam dados ou há candidatos ambíguos. */
   | 'partial'
-  /** Tudo provado (compostos e coerência com o Unicode incluídos): só a 2b-ii-b2 poderá produzir isto. */
+  /** Identidade estrutural e Unicode dos glifos usados comprovados. */
   | 'verified';
 
 export interface FontIdentitySummary {
@@ -52,18 +45,23 @@ export interface FontIdentitySummary {
   glyphs: number;
   /** Glifos simples idênticos a um glifo da original (com as mesmas métricas). */
   simpleMatched: number;
-  /** Destes, quantos têm mais de um glifo candidato na original (contornos duplicados). */
+  /** Glifos cuja identidade continua ambígua após cruzar os candidatos com o Unicode. */
   ambiguous: number;
-  /** Glifos sem contorno (espaço): só a plausibilidade das métricas é conferida. */
+  /** Total de glifos sem contorno. */
   empty: number;
-  /** Glifos compostos: NÃO comprovados nesta versão. */
+  /** Total de glifos compostos. */
   composite: number;
   tablesIdentical: boolean;
+  compositeMatched: number;
+  emptyMatched: number;
+  unicodeMatched: number;
+  verified: boolean;
+  pending: string[];
 }
 
 export interface FontIdentityReport {
   status: FontIdentityStatus;
-  /** O que esta versão do validador comprova quando o status é `partial`. */
+  /** Provas efetivamente satisfeitas pelo resultado agregado. */
   proven: string[];
   /** O que ainda NÃO é comprovado. */
   pending: string[];
@@ -81,13 +79,25 @@ export const PENDING_B1 = [
   'glifos vazios: só a plausibilidade das métricas é conferida',
 ];
 
+export const PROVEN_B2 = [
+  ...PROVEN_B1,
+  'glifos compostos: componentes recursivos, flags, transformações, instruções e métricas idênticos',
+  'glifos vazios e .notdef com identidade e métricas comprovadas',
+  'desenho de cada glifo usado coerente com ToUnicode e cmap Unicode da referência',
+];
+
 export const identityReport = (
   status: FontIdentityStatus,
   fonts: FontIdentitySummary[] = [],
 ): FontIdentityReport => ({
   status,
-  proven: status === 'partial' || status === 'verified' ? [...PROVEN_B1] : [],
-  pending: status === 'verified' ? [] : [...PENDING_B1],
+  proven: status === 'verified' ? [...PROVEN_B2] : status === 'partial' ? [...PROVEN_B1] : [],
+  pending:
+    status === 'verified'
+      ? []
+      : fonts.length > 0
+        ? [...new Set(fonts.flatMap((f) => f.pending))]
+        : [...PENDING_B1],
   fonts,
 });
 
@@ -103,6 +113,9 @@ export interface PreparedReference {
   simple: Map<string, number[]>;
   /** `avanço:lsb` dos glifos sem contorno da original. */
   emptyMetrics: Set<string>;
+  signatures: string[];
+  candidates: Map<string, number[]>;
+  cmap: Map<number, number>;
 }
 
 export interface PreparedReferences {
@@ -171,6 +184,22 @@ export function prepareReferences(
         `${label}: o cabeçalho (macStyle) diz ${bold ? 'negrito' : 'regular'}: variante trocada`,
       );
 
+    let signatures: string[];
+    let cmap: Map<number, number>;
+    try {
+      signatures = glyphSignatures(font);
+      cmap = referenceCmap(font);
+    } catch (error) {
+      if (!(error instanceof FontProofError)) throw error;
+      problems.push(`${label}: ${error.message}`);
+      continue;
+    }
+    const candidates = new Map<string, number[]>();
+    signatures.forEach((key, gid) => {
+      const list = candidates.get(key) ?? [];
+      list.push(gid);
+      candidates.set(key, list);
+    });
     const simple = new Map<string, number[]>();
     const emptyMetrics = new Set<string>();
     for (let g = 0; g < font.numGlyphs; g++) {
@@ -180,10 +209,23 @@ export function prepareReferences(
         if (m !== undefined) emptyMetrics.add(`${m.advance}:${m.lsb}`);
       } else if (!isCompositeGlyph(glyph)) {
         const key = sha256(glyph);
-        simple.set(key, [...(simple.get(key) ?? []), g]);
+        const candidates = simple.get(key) ?? [];
+        candidates.push(g);
+        simple.set(key, candidates);
       }
     }
-    byName.set(name, { name, font, fpgm, prep, cvt, simple, emptyMetrics });
+    byName.set(name, {
+      name,
+      font,
+      fpgm,
+      prep,
+      cvt,
+      simple,
+      emptyMetrics,
+      signatures,
+      candidates,
+      cmap,
+    });
   }
   const regular = raw.get('Lato-Regular');
   const boldBytes = raw.get('Lato-Bold');
@@ -225,6 +267,7 @@ export function checkFontIdentity(
   baseFont: string | undefined,
   font: TrueTypeFont | undefined,
   references: PreparedReferences,
+  unicode?: { toUnicode?: CMap; used: ReadonlySet<number>; usageComplete: boolean },
 ): IdentityOfFont {
   const variantMatch = /\+(Lato-(?:Regular|Bold))$/u.exec(baseFont ?? '');
   const variant = variantMatch === null ? null : (variantMatch[1] as ReferenceName);
@@ -237,6 +280,11 @@ export function checkFontIdentity(
     empty: 0,
     composite: 0,
     tablesIdentical: false,
+    compositeMatched: 0,
+    emptyMatched: 0,
+    unicodeMatched: 0,
+    verified: false,
+    pending: [],
   };
   const problems: string[] = [];
   if (font === undefined) {
@@ -285,10 +333,23 @@ export function checkFontIdentity(
   }
   summary.tablesIdentical = problems.length === tablesBefore;
 
-  // 3. Glifos simples (SHA-256) e métricas; compostos e vazios apenas contados.
+  if (references.problems.length > 0) {
+    problems.push(...references.problems);
+    return { problems, summary };
+  }
+  let signatures: string[];
+  try {
+    signatures = glyphSignatures(font);
+  } catch (error) {
+    if (!(error instanceof FontProofError)) throw error;
+    problems.push(error.message);
+    return { problems, summary };
+  }
+  // 3. Preserva as provas e os diagnósticos da b1; depois comprova compostos, vazios e Unicode.
   const unmatched: number[] = [];
   const wrongMetrics: number[] = [];
   const emptyOdd: number[] = [];
+  let simpleComparisons = 0;
   for (let g = 0; g < font.numGlyphs; g++) {
     const glyph = glyphBytes(font, g);
     const metrics = glyphMetrics(font, g);
@@ -306,6 +367,11 @@ export function checkFontIdentity(
     if (candidates === undefined) {
       unmatched.push(g);
       continue;
+    }
+    simpleComparisons += candidates.length;
+    if (simpleComparisons > 100_000) {
+      problems.push('limite de candidatos/processamento da prova excedido');
+      return { problems, summary };
     }
     // Só vale o candidato que também confere as métricas.
     const proven = candidates.filter((c) => {
@@ -341,5 +407,62 @@ export function checkFontIdentity(
     problems.push(
       `${emptyOdd.length} glifo(s) vazio(s) com métricas que nenhum glifo vazio da original tem: ${listed(emptyOdd)}`,
     );
+  if (signatures[0] !== reference.signatures[0])
+    problems.push('o glifo 0 (.notdef) não é o .notdef da original');
+  summary.ambiguous = 0;
+  let comparisons = 0;
+  for (let gid = 0; gid < signatures.length; gid++) {
+    const key = signatures[gid] ?? '';
+    const candidates = reference.candidates.get(key) ?? [];
+    comparisons += candidates.length;
+    if (comparisons > 100_000) {
+      problems.push('limite de candidatos/processamento da prova excedido');
+      break;
+    }
+    const glyph = glyphBytes(font, gid);
+    if (candidates.length === 0) {
+      if (glyph.length === 0)
+        problems.push(`glifo vazio ${gid} sem identidade/métricas na original`);
+      else if (isCompositeGlyph(glyph))
+        problems.push(
+          `glifo composto ${gid} difere da original (componentes, flags, transformação, instruções ou métricas)`,
+        );
+      continue;
+    }
+    const text = unicode?.toUnicode?.map.get(gid);
+    let disambiguated = gid === 0 && candidates.includes(0);
+    if (gid === 0 && text !== undefined && text !== '\u0000')
+      problems.push('ToUnicode do .notdef não é U+0000');
+    if (gid !== 0 && text !== undefined) {
+      const points = Array.from(text);
+      const point = points[0]?.codePointAt(0);
+      const original = point === undefined ? undefined : reference.cmap.get(point);
+      if (points.length !== 1 || original === undefined || !candidates.includes(original))
+        problems.push(`glifo ${gid}: desenho incompatível com ToUnicode/cmap de referência`);
+      else {
+        summary.unicodeMatched++;
+        disambiguated = true;
+      }
+    }
+    if (!disambiguated && candidates.length > 1) {
+      summary.ambiguous++;
+      summary.pending.push(`glifo ${gid}: identidade ambígua (${candidates.length} candidatos)`);
+    }
+    if (isCompositeGlyph(glyph)) summary.compositeMatched++;
+    else if (glyph.length === 0) summary.emptyMatched++;
+  }
+  if (unicode?.toUnicode !== undefined) {
+    for (const gid of unicode.toUnicode.map.keys())
+      if (gid < 0 || gid >= font.numGlyphs)
+        problems.push(`ToUnicode declara glifo ${gid} fora do programa`);
+  }
+  if (unicode?.toUnicode === undefined || !unicode.usageComplete)
+    summary.pending.push('ToUnicode ou análise completa dos glifos usados não fornecidos');
+  for (const gid of unicode?.used ?? []) {
+    if (gid === 0) problems.push('o glifo .notdef (CID 0) é desenhado');
+    if (gid < 0 || gid >= font.numGlyphs || unicode?.toUnicode?.map.get(gid) === undefined)
+      problems.push(`glifo usado ${gid} sem ToUnicode ou fora do programa`);
+  }
+  summary.verified = problems.length === 0 && summary.pending.length === 0;
   return { problems, summary };
 }

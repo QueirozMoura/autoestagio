@@ -176,7 +176,7 @@ export function readTrueType(
     if (problems.length < MAX_PROBLEMS) problems.push(message);
   };
 
-  if (data.length < limits.minBytes) {
+  if (data.length < Math.max(12, limits.minBytes)) {
     report(`programa de fonte pequeno demais (${data.length} bytes; mínimo ${limits.minBytes})`);
     return { problems };
   }
@@ -387,14 +387,24 @@ export function readTrueType(
     }
   }
   // Compostos que apontam para compostos: profundidade limitada e sem ciclos.
+  const depths = new Map<number, number>();
+  let remainingEdges = 100_000;
   const depthOf = (glyph: number, trail: Set<number>): number => {
     const children = composites.get(glyph);
     if (children === undefined) return 0;
     if (trail.has(glyph)) return Infinity;
+    if (trail.size > limits.maxCompositeDepth || trail.size >= 64 || --remainingEdges < 0) {
+      report('limite de profundidade/processamento dos compostos excedido');
+      return limits.maxCompositeDepth + 1;
+    }
+    const known = depths.get(glyph);
+    if (known !== undefined) return known;
     trail.add(glyph);
     const deepest = Math.max(0, ...children.map((c) => depthOf(c, trail)));
     trail.delete(glyph);
-    return deepest + 1;
+    const depth = deepest + 1;
+    if (Number.isFinite(depth) && depth <= limits.maxCompositeDepth) depths.set(glyph, depth);
+    return depth;
   };
   for (const glyph of composites.keys()) {
     const depth = depthOf(glyph, new Set());

@@ -42,6 +42,7 @@ export function parseToUnicode(text: string, maxEntries = MAX_CMAP_ENTRIES): CMa
   const map = new Map<number, string>();
   const codespace: [number, number][] = [];
   const put = (code: number, value: string): void => {
+    if (map.has(code)) throw new CMapError(`CID repetido no ToUnicode: ${code}`);
     if (map.size >= maxEntries) throw new CMapError(`mais de ${maxEntries} entradas no ToUnicode`);
     map.set(code, value);
   };
