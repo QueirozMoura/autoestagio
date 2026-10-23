@@ -1,7 +1,9 @@
 import {
   analyzePages,
   collectFonts,
+  prepareReferences,
   readPdfStructure,
+  type ReferenceFontInput,
   type FontFacts,
   type PopplerMode,
 } from '../../src/cv/validate/index.js';
@@ -153,16 +155,19 @@ export function runFontChecks(
     limits?: Partial<TrueTypeLimits>;
     texts?: { source: string; text: string }[];
     allowedFonts?: readonly RegExp[];
+    references?: readonly ReferenceFontInput[];
   } = {},
 ) {
   const structure = readPdfStructure(pdf);
   const analyzed = analyzePages(structure);
+  const prepared = prepareReferences(options.references);
   const reading = checkFonts({
     structure,
     structureError: undefined,
     pages: analyzed.pages,
     poppler: { mode: options.mode ?? 'off', text: options.poppler },
     allowedFonts: options.allowedFonts ?? DEFAULT_ALLOWED_FONTS,
+    ...(prepared === undefined ? {} : { references: prepared }),
     ...(options.limits === undefined ? {} : { limits: options.limits }),
   });
   const h7 = checkLigatures({
@@ -171,5 +176,5 @@ export function runFontChecks(
     fonts: reading.fonts,
     texts: options.texts ?? [],
   });
-  return { h6: reading.check, h7, fonts: reading.fonts };
+  return { h6: reading.check, h7, fonts: reading.fonts, identity: reading.identity };
 }

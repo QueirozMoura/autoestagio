@@ -6,7 +6,7 @@ import {
   REQUIRED_TABLES,
   readTrueType,
 } from '../../src/cv/validate/index.js';
-import { isEmptyGlyph } from '../../src/cv/validate/truetype.js';
+import { glyphMetrics, isEmptyGlyph } from '../../src/cv/validate/truetype.js';
 import { mutateTtf, parseTtf, realFont } from '../helpers/cv-fonts.js';
 import { fictionalResume } from '../helpers/cv-resume.js';
 
@@ -55,6 +55,63 @@ describe('leitor TrueType: subconjuntos reais do PDFKit', () => {
   it('as seis tabelas obrigatórias fazem parte da lista permitida', () => {
     for (const tag of REQUIRED_TABLES) expect(ALLOWED_TABLES).toContain(tag);
     expect(DEFAULT_TRUETYPE_LIMITS.maxBytes).toBeLessThan(657_212); // a fonte completa não é um subconjunto
+  });
+});
+
+describe('métricas TrueType: acesso defensivo', () => {
+  const metricFont = () => {
+    const font = readTrueType(program).font;
+    if (font === undefined) throw new Error('sem fonte');
+    // Uma métrica completa, seguida dos lados esquerdos que reutilizam o avanço.
+    return {
+      ...font,
+      numGlyphs: 3,
+      numberOfHMetrics: 1,
+      data: Buffer.from([0x01, 0xf4, 0xff, 0xf9, 0xff, 0xf8, 0xff, 0xf7]),
+      tables: new Map([['hmtx', { offset: 0, length: 8 }]]),
+    };
+  };
+
+  it('lê a métrica completa e o avanço compartilhado até o último glifo', () => {
+    const font = metricFont();
+    expect(glyphMetrics(font, 0)).toEqual({ advance: 500, lsb: -7 });
+    expect(glyphMetrics(font, 1)).toEqual({ advance: 500, lsb: -8 });
+    expect(glyphMetrics(font, 2)).toEqual({ advance: 500, lsb: -9 });
+  });
+
+  it.each([0, 1, 3, 4, 7, 9])('hmtx com %i bytes não permite leitura parcial', (length) => {
+    const font = metricFont();
+    font.data = Buffer.alloc(length);
+    font.tables.set('hmtx', { offset: 0, length });
+    for (const glyph of [0, 1, 2]) expect(glyphMetrics(font, glyph)).toBeUndefined();
+  });
+
+  it.each([0, -1, 0.5, NaN, Infinity, 4])('numberOfHMetrics inválido: %s', (count) => {
+    const font = { ...metricFont(), numberOfHMetrics: count };
+    expect(glyphMetrics(font, 0)).toBeUndefined();
+    expect(glyphMetrics(font, 2)).toBeUndefined();
+  });
+
+  it.each([0, -1, 0.5, NaN, Infinity])('numGlyphs inválido: %s', (count) => {
+    expect(glyphMetrics({ ...metricFont(), numGlyphs: count }, 0)).toBeUndefined();
+  });
+
+  it.each([-1, 0.5, NaN, Infinity, 3])('índice de glifo inválido: %s', (glyph) => {
+    expect(glyphMetrics(metricFont(), glyph)).toBeUndefined();
+  });
+
+  it.each([-1, 0.5, NaN, Infinity, 1, 8, 9])('offset de hmtx fora dos limites: %s', (offset) => {
+    const font = metricFont();
+    font.tables.set('hmtx', { offset, length: 8 });
+    expect(glyphMetrics(font, 0)).toBeUndefined();
+  });
+
+  it('tabela ausente e dados truncados após a leitura não permitem acesso', () => {
+    const font = metricFont();
+    font.data = font.data.subarray(0, 7);
+    expect(glyphMetrics(font, 2)).toBeUndefined();
+    font.tables.delete('hmtx');
+    expect(glyphMetrics(font, 0)).toBeUndefined();
   });
 });
 

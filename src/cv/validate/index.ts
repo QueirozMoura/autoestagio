@@ -14,6 +14,12 @@ import { expectedContent } from './expected.js';
 import { analyzePages } from './content-stream.js';
 import { checkDangerous } from './dangerous.js';
 import { DEFAULT_ALLOWED_FONTS, checkFonts, checkLigatures } from './fonts.js';
+import {
+  identityReport,
+  prepareReferences,
+  type FontIdentityReport,
+  type ReferenceFontInput,
+} from './font-identity.js';
 import type { TrueTypeLimits } from './truetype.js';
 import { checkForbiddenContent, type ForbiddenSet } from './forbidden.js';
 import { checkGeometry } from './geometry.js';
@@ -67,7 +73,23 @@ export {
   type PdffontsRow,
 } from './fonts.js';
 export {
+  PENDING_B1,
+  PROVEN_B1,
+  REFERENCE_NAMES,
+  checkFontIdentity,
+  identityReport,
+  prepareReferences,
+  type FontIdentityReport,
+  type FontIdentityStatus,
+  type FontIdentitySummary,
+  type PreparedReference,
+  type PreparedReferences,
+  type ReferenceFontInput,
+  type ReferenceName,
+} from './font-identity.js';
+export {
   ALLOWED_TABLES,
+  REFERENCE_TRUETYPE_LIMITS,
   DEFAULT_TRUETYPE_LIMITS,
   REQUIRED_TABLES,
   readTrueType,
@@ -137,6 +159,13 @@ export interface ValidateOptions {
   allowedFonts?: readonly RegExp[];
   /** Limites do leitor TrueType (padrão defensivo). */
   fontLimits?: Partial<TrueTypeLimits>;
+  /**
+   * Bytes da Lato original (Regular e Bold) para comparar com os subconjuntos embutidos. O validador não abre
+   * arquivos: quem chama entrega os bytes. Opcional na 2b-ii-b1; a integração final (2c) vai exigi-los.
+   */
+  referenceFonts?: readonly ReferenceFontInput[];
+  /** Limites para ler as referências (padrão: fonte completa). */
+  referenceLimits?: Partial<TrueTypeLimits>;
 }
 
 export interface ExtractorInfo {
@@ -155,6 +184,11 @@ export interface ValidationReport {
   complete: false;
   /** Um `ForbiddenSet` foi informado (sem ele, o H5 só confere texto inválido). */
   forbiddenProvided: boolean;
+  /**
+   * Identidade dos glifos com a Lato original. Na 2b-ii-b1 o melhor resultado é `partial`: os glifos compostos
+   * e a coerência com o Unicode só serão provados na 2b-ii-b2. `partial` NUNCA equivale a validação completa.
+   */
+  fontIdentity: FontIdentityReport;
   implemented: CheckId[];
   pending: string[];
   pdfSha256: string;
@@ -221,6 +255,9 @@ export async function validateRenderedPdf(
     expectedPages: options.expectedPages,
   });
   const checks: CheckResult[] = [integrity];
+  let fontIdentity: FontIdentityReport = identityReport(
+    options.referenceFonts === undefined ? 'not-supplied' : 'not-run',
+  );
   if (extracted === undefined || (integrity.status === 'fail' && readError !== undefined)) {
     for (const id of ['H2', 'H3', 'H4', 'H5', 'H6', 'H7', 'H8', 'H9', 'H10'] as const)
       checks.push(skipped(id, NAMES[id], 'depende de H1 (PDF ilegível)'));
@@ -256,6 +293,7 @@ export async function validateRenderedPdf(
       },
       localMarkers: options.localMarkers ?? [],
     });
+    const references = prepareReferences(options.referenceFonts, options.referenceLimits);
     const analyzed = structure === undefined ? undefined : analyzePages(structure);
     const fonts = checkFonts({
       structure,
@@ -263,8 +301,10 @@ export async function validateRenderedPdf(
       pages: analyzed?.pages ?? [],
       poppler,
       allowedFonts: options.allowedFonts ?? DEFAULT_ALLOWED_FONTS,
+      ...(references === undefined ? {} : { references }),
       ...(options.fontLimits === undefined ? {} : { limits: options.fontLimits }),
     });
+    fontIdentity = fonts.identity;
     const operatorText = (analyzed?.pages ?? []).map((p) => p.analysis?.text ?? '').join('\n');
     checks.push(
       checkContent(extracted, expected, poppler),
@@ -300,6 +340,7 @@ export async function validateRenderedPdf(
     ok: checks.every((c) => c.status === 'pass'),
     complete: false,
     forbiddenProvided: options.forbidden !== undefined,
+    fontIdentity,
     implemented: IMPLEMENTED,
     pending: PENDING,
     pdfSha256: createHash('sha256').update(bytes).digest('hex'),

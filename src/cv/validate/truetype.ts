@@ -6,7 +6,9 @@
  * vira problema (falha fechada), nunca é ignorada. Os checksums das tabelas NÃO são conferidos: o subconjunto do
  * PDFKit não os preenche (medido), então o diretório traz valores que não batem.
  *
- * A comparação com a fonte original (identidade dos glifos, bytecode) pertence à próxima entrega.
+ * A comparação com a fonte original (identidade dos glifos, bytecode) fica em `font-identity.ts`; este leitor só
+ * oferece o acesso às tabelas, aos glifos e às métricas, e o modo `reference` para ler a fonte COMPLETA (outras
+ * tabelas, outros limites).
  */
 export interface TrueTypeLimits {
   minBytes: number;
@@ -51,6 +53,22 @@ export const REQUIRED_TABLES = ['head', 'hhea', 'loca', 'maxp', 'glyf', 'hmtx'] 
 export const HEAD_MAGIC = 0x5f0f3cf5;
 const MAX_PROBLEMS = 20;
 
+/** Limites para ler uma fonte de REFERÊNCIA completa (a Lato inteira tem 3.023 glifos e ~650 KB). */
+export const REFERENCE_TRUETYPE_LIMITS: TrueTypeLimits = {
+  minBytes: 50 * 1024,
+  maxBytes: 2 * 1024 * 1024,
+  maxTables: 32,
+  maxGlyphs: 6000,
+  maxCompositeDepth: 8,
+  maxComponents: 64,
+  maxPoints: 10_000,
+};
+
+export interface ReadOptions {
+  /** Fonte completa de referência: aceita qualquer tabela (sem a lista do subconjunto do PDFKit). */
+  reference?: boolean;
+}
+
 export interface TrueTypeTable {
   offset: number;
   length: number;
@@ -80,6 +98,66 @@ export const isEmptyGlyph = (font: TrueTypeFont, glyph: number): boolean => {
   return range === undefined || range[1] === range[0];
 };
 
+/** Bytes de uma tabela (ou `undefined` se não existir). */
+export const tableBytes = (font: TrueTypeFont, tag: string): Buffer | undefined => {
+  const table = font.tables.get(tag);
+  return table === undefined
+    ? undefined
+    : font.data.subarray(table.offset, table.offset + table.length);
+};
+
+/** Bytes de um glifo dentro de `glyf` (vazio para o glifo sem contorno). */
+export const glyphBytes = (font: TrueTypeFont, glyph: number): Buffer => {
+  const glyf = font.tables.get('glyf');
+  const range = font.glyphRanges[glyph];
+  if (glyf === undefined || range === undefined) return Buffer.alloc(0);
+  return font.data.subarray(glyf.offset + range[0], glyf.offset + range[1]);
+};
+
+/** Glifo composto: `numberOfContours` negativo. */
+export const isCompositeGlyph = (bytes: Buffer): boolean =>
+  bytes.length >= 2 && bytes.readInt16BE(0) < 0;
+
+export interface GlyphMetrics {
+  advance: number;
+  lsb: number;
+}
+
+/** Largura de avanço e lado esquerdo do glifo; estrutura parcial ou métricas inválidas não são lidas. */
+export const glyphMetrics = (font: TrueTypeFont, glyph: number): GlyphMetrics | undefined => {
+  const n = font.numberOfHMetrics;
+  if (
+    !Number.isSafeInteger(font.numGlyphs) ||
+    font.numGlyphs < 1 ||
+    !Number.isSafeInteger(n) ||
+    n < 1 ||
+    n > font.numGlyphs ||
+    !Number.isSafeInteger(glyph) ||
+    glyph < 0 ||
+    glyph >= font.numGlyphs
+  )
+    return undefined;
+  const table = font.tables.get('hmtx');
+  const expectedLength = 4 * n + 2 * (font.numGlyphs - n);
+  if (
+    table === undefined ||
+    !Number.isSafeInteger(expectedLength) ||
+    !Number.isSafeInteger(table.offset) ||
+    table.offset < 0 ||
+    table.offset > font.data.length ||
+    table.length !== expectedLength ||
+    table.length > font.data.length - table.offset
+  )
+    return undefined;
+  const hmtx = font.data.subarray(table.offset, table.offset + table.length);
+  if (glyph < n)
+    return { advance: hmtx.readUInt16BE(4 * glyph), lsb: hmtx.readInt16BE(4 * glyph + 2) };
+  return {
+    advance: hmtx.readUInt16BE(4 * (n - 1)),
+    lsb: hmtx.readInt16BE(4 * n + 2 * (glyph - n)),
+  };
+};
+
 const u16 = (data: Buffer, at: number): number => data.readUInt16BE(at);
 const i16 = (data: Buffer, at: number): number => data.readInt16BE(at);
 const u32 = (data: Buffer, at: number): number => data.readUInt32BE(at);
@@ -87,8 +165,12 @@ const u32 = (data: Buffer, at: number): number => data.readUInt32BE(at);
 export function readTrueType(
   data: Buffer,
   limitOverrides: Partial<TrueTypeLimits> = {},
+  options: ReadOptions = {},
 ): TrueTypeReading {
-  const limits = { ...DEFAULT_TRUETYPE_LIMITS, ...limitOverrides };
+  const limits = {
+    ...(options.reference === true ? REFERENCE_TRUETYPE_LIMITS : DEFAULT_TRUETYPE_LIMITS),
+    ...limitOverrides,
+  };
   const problems: string[] = [];
   const report = (message: string): void => {
     if (problems.length < MAX_PROBLEMS) problems.push(message);
@@ -128,7 +210,7 @@ export function readTrueType(
     const offset = u32(data, at + 8);
     const length = u32(data, at + 12);
     if (tables.has(tag)) report(`tabela "${tag}" repetida`);
-    if (!(ALLOWED_TABLES as readonly string[]).includes(tag))
+    if (options.reference !== true && !(ALLOWED_TABLES as readonly string[]).includes(tag))
       report(`tabela não permitida: "${tag}"`);
     if (offset < directoryEnd || offset + length > data.length)
       report(`tabela "${tag}" fora dos limites do arquivo (offset ${offset}, tamanho ${length})`);

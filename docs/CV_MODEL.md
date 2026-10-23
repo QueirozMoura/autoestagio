@@ -188,7 +188,7 @@ apenas "H1 a H4 passaram".
 ### Entrega 2b-ii-a: H6 (fontes) e H7 (ligaduras)
 
 `implemented` passa a ser H1–H10 e `pending` fica vazio; **`complete` continua `false`**: faltam a comparação dos glifos
-com a fonte original e da forma com o Unicode (2b-ii-b) e a integração final (2c). Por isso este H6 **não prova que os
+com a fonte original e da forma com o Unicode (2b-ii-b; a primeira parte, b1, está descrita abaixo) e a integração final (2c). Por isso este H6 **não prova que os
 glifos são os da Lato**: confere estrutura, consistência interna e cobertura.
 
 - **`truetype.ts`:** leitor TrueType mínimo e defensivo dos subconjuntos do PDFKit. Cabeçalho `sfnt` (`true` ou
@@ -208,6 +208,29 @@ glifos são os da Lato**: confere estrutura, consistência interna e cobertura.
   FB1D–FB4F, FB50–FDFF, FE70–FEFE, U+0132–0133, 01C4–01CC, 01F1–01F3), caracteres invisíveis ou de formatação e
   inválidos (controle, U+FFFD, uso privado, não caracteres, substitutos soltos); reconfere os textos extraídos (pdfjs,
   operadores e Poppler). **Exceção específica:** o `.notdef` (CID 0) mapeado para U+0000, como o PDFKit sempre grava.
+
+### Entrega 2b-ii-b1: identidade parcial dos subconjuntos com a Lato original
+
+Opção `referenceFonts: { name: 'Lato-Regular' | 'Lato-Bold'; bytes: Uint8Array }[]`. **O validador não abre arquivo:**
+quem chama entrega os bytes (o pipeline lê `assets/fonts/lato/`). É **opcional** nesta entrega; a integração final (2c)
+vai **exigi-las**. Sem elas, o H6 segue só estrutural e o relatório diz `fontIdentity.status: 'not-supplied'`.
+
+- **Referências:** lidas com limites próprios de fonte completa (50 KB a 2 MiB, até 6.000 glifos). Reprova referência
+  ilegível, repetida, de nome inválido, sem `fpgm`/`prep`/`cvt `, com variante trocada (o `macStyle` do cabeçalho diz se
+  é negrito, não só o nome informado) ou com os mesmos bytes nas duas variantes. Referência ruim nunca é ignorada.
+- **Comparação** (variante pelo sufixo do `BaseFont`): `fpgm`, `prep` e `cvt ` **byte a byte**; `head`, `hhea` e `maxp`
+  iguais aos da original, exceto os campos que o subconjunto muda (`indexToLocFormat`, `numberOfHMetrics`, `numGlyphs`)
+  — medido contra a saída do PDFKit; cada glifo **simples** por SHA-256 (conjunto de candidatos quando há contornos
+  duplicados na original) **e** com as mesmas métricas `hmtx` (avanço e lado esquerdo) do candidato; o `.notdef` tem de
+  ser o `.notdef` da original. Glifo simples sem correspondente ou com métrica diferente reprova o H6.
+- **`fontIdentity` no relatório:** `not-supplied`, `not-run`, `failed`, `partial` e `verified`. Nesta entrega o melhor
+  resultado é **`partial`**, com as listas `proven` e `pending`; **`verified` não é produzido** (reservado à 2b-ii-b2).
+  `partial` nunca equivale a validação completa, e `complete` segue `false`.
+- **Não comprovado (2b-ii-b2):** glifos **compostos** (o PDFKit reindexa os componentes; são contados, nunca aceitos
+  como comprovados), a coerência entre o desenho e o caractere do `ToUnicode` (um glifo que desenha "A" e declara "B"
+  ainda **não** é detectado) e os glifos **vazios** (só se confere que a métrica existe em algum glifo vazio da original).
+- **Acoplamento:** a identidade byte a byte de `fpgm`/`prep`/`cvt ` e dos glifos simples é um fato medido da versão atual
+  do PDFKit; uma atualização que mude o subsetting faz a validação dos PDFs reais falhar (falha fechada).
 
 ## Relatório de fidelidade
 

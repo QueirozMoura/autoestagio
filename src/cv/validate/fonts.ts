@@ -1,4 +1,11 @@
 import { clip, result, type CheckResult, type PopplerInput } from './checks.js';
+import {
+  checkFontIdentity,
+  identityReport,
+  type FontIdentityReport,
+  type FontIdentitySummary,
+  type PreparedReferences,
+} from './font-identity.js';
 import { CMapError, parseToUnicode, type CMap } from './cmap.js';
 import type { PageAnalysis } from './content-stream.js';
 import {
@@ -202,11 +209,14 @@ export interface FontsInput {
   poppler: PopplerInput;
   allowedFonts: readonly RegExp[];
   limits?: Partial<TrueTypeLimits>;
+  /** Referências já lidas (bytes da Lato original). Sem elas, só a verificação estrutural vale. */
+  references?: PreparedReferences;
 }
 
 export interface FontsReading {
   check: CheckResult;
   fonts: FontFacts[];
+  identity: FontIdentityReport;
 }
 
 const NAME = 'fontes embutidas, subconjuntos e ToUnicode';
@@ -222,10 +232,13 @@ export function checkFonts(input: FontsInput): FontsReading {
         '',
       ),
       fonts: [],
+      identity: identityReport(input.references === undefined ? 'not-supplied' : 'not-run'),
     };
   const problems: string[] = [];
   const notes: string[] = [];
   const fonts = collectFonts(structure, pages, input.limits);
+  const identityProblems: string[] = [...(input.references?.problems ?? [])];
+  const identityFonts: FontIdentitySummary[] = [];
   if (fonts.length === 0) problems.push('o PDF não declara nenhuma fonte nos recursos das páginas');
 
   for (const font of fonts) {
@@ -266,11 +279,39 @@ export function checkFonts(input: FontsInput): FontsReading {
     if (font.programError !== undefined)
       problems.push(`${label}: programa ilegível (${font.programError})`);
     for (const p of font.truetype?.problems ?? []) problems.push(`${label}: ${p}`);
+    if (input.references !== undefined) {
+      // O leitor pode devolver uma estrutura parcial junto dos erros. Ela não serve para provar identidade.
+      const validFont = font.truetype?.problems.length === 0 ? font.truetype.font : undefined;
+      const identity = checkFontIdentity(font.baseFont, validFont, input.references);
+      identityFonts.push(identity.summary);
+      for (const p of identity.problems) identityProblems.push(`${label}: identidade: ${p}`);
+    }
 
     if (!font.hasToUnicode) problems.push(`${label}: sem /ToUnicode`);
     else if (font.toUnicodeError !== undefined)
       problems.push(`${label}: ToUnicode ilegível (${font.toUnicodeError})`);
   }
+
+  problems.push(...identityProblems);
+  if (input.references !== undefined && fonts.length === 0)
+    identityProblems.push('nenhuma fonte do PDF para comparar com as referências');
+  const identity =
+    input.references === undefined
+      ? identityReport('not-supplied')
+      : identityReport(identityProblems.length > 0 ? 'failed' : 'partial', identityFonts);
+  if (identity.status === 'not-supplied')
+    notes.push(
+      'referências de fonte não informadas: a identidade dos glifos com a Lato original NÃO foi verificada',
+    );
+  else if (identity.status === 'partial')
+    notes.push(
+      `identidade com a Lato original: PARCIAL (${identityFonts
+        .map(
+          (f) =>
+            `${f.variant ?? f.font}: ${f.simpleMatched} simples comprovados, ${f.composite} compostos e ${f.empty} vazios não comprovados`,
+        )
+        .join('; ')}); compostos e coerência com o Unicode ficam para a 2b-ii-b2`,
+    );
 
   // Cobertura: todo glifo desenhado precisa existir no programa e ter texto no ToUnicode.
   let used = 0;
@@ -360,6 +401,7 @@ export function checkFonts(input: FontsInput): FontsReading {
       notes,
     ),
     fonts,
+    identity,
   };
 }
 
