@@ -15,7 +15,11 @@ import {
   verifyLinks,
   type LinkCheck,
 } from '../cv/index.js';
+import { CV_VARIANTS, inspectVariants } from '../cv/strict-inputs.js';
 import { createHttpClient, loadSourcesConfig } from '../sources/index.js';
+import { formatGenerate, generateJson, generateResume } from './cv-generate.js';
+import { formatVariants, variantsJson } from './cv-variants.js';
+import type { StrictInputsOptions } from '../cv/strict-inputs.js';
 
 /** Caminho do PDF mestre: --pdf, ou o currículo registrado na aprovação do perfil. */
 function masterPdfPath(option: string | undefined): string {
@@ -30,6 +34,18 @@ function masterPdfPath(option: string | undefined): string {
 function poppler(pdf: string): { extractor: string; text: string } | undefined {
   const run = spawnSync('pdftotext', ['-enc', 'UTF-8', pdf, '-'], { encoding: 'utf8' });
   return run.status === 0 ? { extractor: 'poppler (pdftotext)', text: run.stdout } : undefined;
+}
+
+/** Opções do carregador estrito a partir da configuração real; a âncora vem sempre do operador. */
+function strictInputsOptions(anchorSha256: string | undefined): StrictInputsOptions {
+  const config = loadConfig();
+  const approval = loadProfile(config.profilePath)?.approval;
+  return {
+    modelPath: config.cvModelPath,
+    masterPdf:
+      approval === undefined ? undefined : { path: approval.cvFile, sha256: approval.cvSha256 },
+    anchorSha256,
+  };
 }
 
 export function registerCvCommands(program: Command): void {
@@ -143,4 +159,54 @@ export function registerCvCommands(program: Command): void {
         ].join('\n'),
       );
     });
+
+  cv.command('variants')
+    .description(
+      'Lista as variantes do currículo: estado editorial, elegibilidade e pré-condições locais (não valida nem gera PDF)',
+    )
+    .option(
+      '--ancora-sha256 <hash>',
+      'SHA-256 do arquivo de âncora de confiança (referência explícita; sem ela as pré-condições ficam indisponíveis)',
+    )
+    .option('--json', 'saída em JSON')
+    .action((options: { ancoraSha256?: string; json?: boolean }) => {
+      const variants = inspectVariants(strictInputsOptions(options.ancoraSha256));
+      console.log(
+        options.json === true
+          ? JSON.stringify(variantsJson(variants), null, 2)
+          : formatVariants(variants),
+      );
+    });
+
+  cv.command('generate')
+    .description(
+      'Gera o PDF de uma variante pelo fluxo estrito (nunca sobrescreve; só publica se a validação estiver completa)',
+    )
+    .option('--variant <id>', `variante (${CV_VARIANTS.map((v) => v.id).join(', ')})`)
+    .option('--ancora-sha256 <hash>', 'SHA-256 do arquivo de âncora de confiança (obrigatório)')
+    .option(
+      '--output <diretorio>',
+      'diretório de saída (padrão: data/cv-output/, criado com 0700); o nome do arquivo é definido pelo programa',
+    )
+    .option('--json', 'saída em JSON')
+    .action(
+      async (options: {
+        variant?: string;
+        ancoraSha256?: string;
+        output?: string;
+        json?: boolean;
+      }) => {
+        const outcome = await generateResume({
+          variant: options.variant,
+          inputs: strictInputsOptions(options.ancoraSha256),
+          ...(options.output === undefined ? {} : { output: options.output }),
+        });
+        console.log(
+          options.json === true
+            ? JSON.stringify(generateJson(outcome), null, 2)
+            : formatGenerate(outcome),
+        );
+        if (!outcome.ok) process.exitCode = 1;
+      },
+    );
 }

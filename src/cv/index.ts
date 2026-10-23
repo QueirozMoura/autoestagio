@@ -115,3 +115,17 @@ export {
   type ValidateOptions,
   type ValidationReport,
 } from './validate/index.js';
+export {
+  ANCHOR_FILE,
+  CV_VARIANTS,
+  StrictInputsError,
+  describeVariants,
+  inspectVariants,
+  loadStrictInputs,
+  popplerAvailable,
+  type CvVariantId,
+  type LoadedStrictInputs,
+  type StrictInputsErrorCode,
+  type StrictInputsOptions,
+  type VariantInfo,
+} from './strict-inputs.js';

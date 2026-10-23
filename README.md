@@ -36,11 +36,24 @@ instalação falhar, instale as ferramentas de compilação (`build-essential` e
 | `npm run dev -- migrate`         | Cria o banco e aplica migrações pendentes                                                 |
 | `npm run dev -- scan`            | Coleta estágios nas fontes de `config/sources.json` (Greenhouse e Lever), somente leitura |
 | `npm run dev -- scan --simulate` | Coleta simulada com fontes fictícias, sem rede (veja abaixo)                              |
+| `npm run dev -- cv variants`     | Lista as variantes do currículo (estado editorial, elegibilidade, pré-condições)          |
+| `npm run dev -- cv generate`     | Gera e grava o PDF de uma variante pelo fluxo estrito (veja `docs/CV_GENERATE.md`)        |
 | `npm run build` / `start`        | Compila para `dist/` e executa a versão compilada                                         |
 | `npm test`                       | Testes (Vitest)                                                                           |
 | `npm run typecheck`              | Verificação de tipos (TypeScript strict)                                                  |
 | `npm run lint`                   | ESLint                                                                                    |
 | `npm run format`                 | Prettier                                                                                  |
+
+## Currículos em PDF (fluxo estrito)
+
+```bash
+npm run dev -- cv variants --ancora-sha256 <hash>
+npm run dev -- cv generate --variant desenvolvimento --ancora-sha256 <hash> [--output <diretório>]
+```
+
+O PDF só é gravado se a validação estrita estiver completa; nunca sobrescreve arquivos e vai, por
+padrão, para `data/cv-output/` (ignorado pelo Git, modo 0700). Detalhes, pré-requisitos, erros e
+limites de segurança: [docs/CV_GENERATE.md](docs/CV_GENERATE.md).
 
 ## Scan real (somente leitura)
 
