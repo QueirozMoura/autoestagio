@@ -59,7 +59,8 @@ export type GenerateOutcome =
 
 const sha256 = (bytes: Uint8Array): string => createHash('sha256').update(bytes).digest('hex');
 const pad = (n: number): string => String(n).padStart(2, '0');
-const stamp = (d: Date): string => `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}`;
+export const stamp = (d: Date): string =>
+  `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}`;
 const fail = (
   stage: GenerateStage,
   code: string,
@@ -76,7 +77,7 @@ const fail = (
 const CHECKS = ['H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'H7', 'H8', 'H9', 'H10'];
 
 /** Autorização de publicação: somente o relatório ESTRITO e o artefato selado; nunca o diagnóstico sozinho. */
-function publishable(result: StrictResumeResult): boolean {
+export function publishable(result: StrictResumeResult): boolean {
   const { report, artifact } = result;
   const d = report.diagnostic;
   return (
@@ -98,6 +99,10 @@ function publishable(result: StrictResumeResult): boolean {
     d.extractors.some((e) => e.name === 'poppler (pdftotext)' && e.status === 'used')
   );
 }
+
+/** Nome do PDF, sempre construído pela aplicação. */
+export const outputFileName = (variant: string, digest: string, now: Date): string =>
+  `curriculo-${variant}-${stamp(now)}-${digest.slice(0, 8)}.pdf`;
 
 /** Fluxo único: carregar (4.4a) -> renderAndValidateResume (4.3) -> writePrivateExclusive (4.4b). */
 export async function generateResume(
@@ -150,7 +155,7 @@ export async function generateResume(
     request.output === undefined
       ? resolveFromRoot(DEFAULT_OUTPUT_DIR, request.root)
       : resolve(request.output);
-  const name = `curriculo-${variant.id}-${stamp((deps.now ?? (() => new Date()))())}-${digest.slice(0, 8)}.pdf`;
+  const name = outputFileName(variant.id, digest, (deps.now ?? (() => new Date()))());
   try {
     const written = write({
       dir,

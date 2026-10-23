@@ -17,6 +17,7 @@ import {
 } from '../cv/index.js';
 import { CV_VARIANTS, inspectVariants } from '../cv/strict-inputs.js';
 import { createHttpClient, loadSourcesConfig } from '../sources/index.js';
+import { registerCvAttachCommands } from './cv-attach-commands.js';
 import { formatGenerate, generateJson, generateResume } from './cv-generate.js';
 import { formatVariants, variantsJson } from './cv-variants.js';
 import type { StrictInputsOptions } from '../cv/strict-inputs.js';
@@ -209,4 +210,6 @@ export function registerCvCommands(program: Command): void {
         if (!outcome.ok) process.exitCode = 1;
       },
     );
+
+  registerCvAttachCommands(cv, strictInputsOptions);
 }

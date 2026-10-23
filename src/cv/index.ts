@@ -129,3 +129,24 @@ export {
   type StrictInputsOptions,
   type VariantInfo,
 } from './strict-inputs.js';
+export {
+  ARTIFACT_VALIDATION,
+  ATTACHMENT_STATES,
+  attachmentRowSchema,
+  cvArtifactRowSchema,
+  type AttachmentRow,
+  type AttachmentState,
+  type CvArtifactRow,
+} from './artifacts.js';
+export {
+  AttachmentError,
+  approveAttachment,
+  createAttachment,
+  listAttachments,
+  liveAttachment,
+  registerArtifact,
+  revokeAttachment,
+  type AttachmentErrorCode,
+  type AttachmentView,
+  type NewArtifact,
+} from './attachments.js';
