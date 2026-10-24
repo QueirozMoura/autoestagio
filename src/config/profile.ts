@@ -55,6 +55,8 @@ export const profileSchema = z
         startFrom: z.iso.date(),
       })
       .optional(),
+    /** Ponto de referência dos deslocamentos (só rótulo, ex.: "Guarapiranga, Zona Sul de São Paulo"). */
+    home: z.object({ label: z.string().min(1).max(120) }).optional(),
     /**
      * Tempos de deslocamento verificados pelo usuário (por trecho). Só o que está aqui é
      * considerado "verificável"; local fora da lista = deslocamento desconhecido.
@@ -67,6 +69,8 @@ export const profileSchema = z
           minutesPerWay: z.number().int().positive(),
           /** Como foi verificado (ex.: "Google Maps, transporte público, 2026-10-22"). */
           source: z.string().min(1),
+          /** Data (AAAA-MM-DD) em que VOCÊ confirmou o tempo. */
+          confirmedAt: z.iso.date().optional(),
         }),
       )
       .optional(),
@@ -100,7 +104,10 @@ export const profileSchema = z
       preferred: z.array(z.enum(['remoto', 'hibrido', 'presencial'])).min(1),
       onsite: z.object({
         allowed: z.boolean(),
+        /** Até este tempo por trecho o deslocamento é adequado. */
         maxCommuteMinutesPerWay: z.number().int().positive(),
+        /** Acima do limite e até este tempo: revisão manual (padrão: limite + 10). Acima: incompatível. */
+        reviewMaxCommuteMinutesPerWay: z.number().int().positive().optional(),
       }),
     }),
     minStipend: z.object({

@@ -143,6 +143,15 @@ describe('cv attach: consulta e entradas', () => {
     expect(suggestVariant('Estágio em Suporte Técnico', null).variant).toBe('generico');
     expect(suggestVariant('Estágio em TI', null).variant).toBe('generico');
     expect(suggestVariant('Estágio em Desenvolvimento e QA', null).variant).toBe('generico');
+    // Áreas novas não têm currículo próprio: a sugestão inicial é o genérico (a escolha continua explícita).
+    for (const title of [
+      'Estágio em Segurança da Informação',
+      'Estágio em Governança de TI',
+      'Estágio em ERP / Protheus',
+      'Estágio em Automação de Processos (RPA)',
+      'Estágio em Operações de TI',
+    ])
+      expect(suggestVariant(title, null).variant).toBe('generico');
   });
 
   it('variante não aprovada, âncora ausente/incorreta e aprovação editorial obsoleta', async () => {

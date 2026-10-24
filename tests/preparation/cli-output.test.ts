@@ -96,7 +96,16 @@ describe('pré-visualização no terminal', () => {
     ).toBe('Recusada (inapta): vaga inapta');
     expect(formatCandidates([])).toContain('Nenhuma vaga elegível');
     expect(
-      formatCandidates([{ jobId: 4, title: 'T', company: 'C', verdict: 'revisao_humana' }]),
+      formatCandidates([
+        {
+          jobId: 4,
+          title: 'T',
+          company: 'C',
+          verdict: 'revisao_humana',
+          position: 1,
+          explanation: [],
+        },
+      ]),
     ).toContain('exige --override-review');
   });
 });

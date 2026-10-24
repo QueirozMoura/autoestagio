@@ -97,3 +97,16 @@ CI&T, VTEX, QuintoAndar, Stone, EBANX, Jusbrasil, Thoughtworks e outros.
 Coleta limitada (≤ 20 vagas e ≤ 3 páginas por fonte, 1 requisição a cada 2 s por host), somente
 leitura, 8 fontes: **570 vagas listadas → 20 com título de estágio → 12 no Brasil → 12 gravadas**,
 das quais **1 é de TI**. Nenhum erro e nenhuma falha de gravação.
+
+## Leads de alertas (Indeed, LinkedIn) e quadros públicos
+
+- **Leads** (`leads add|import|list|set`, tabela `job_leads`, migração 0010) são **pistas**, não vagas oficiais nem candidaturas, e não autorizam nenhum envio:
+  não há ligação com `jobs`, `applications` nem com o canal de e-mail. O canal de candidatura começa "desconhecido" e só você o confirma, na página oficial.
+  O endereço do remetente de um alerta nunca é destinatário. A avaliação de um lead nunca é "apto".
+- **Links de alerta** são pessoais: a aplicação remove query e fragmento; prefira o link oficial da empresa.
+- **Quadros públicos verificados em 2026-10-23** (Greenhouse, Lever, Ashby; só leitura): para 25 nomes de empresas vistas nos alertas (Mottu, Medway, Kolab, Solví,
+  Holos Media, Giant Steps, SONDA, Apsis, Vonex, Shakers, Timbro, Diebold, Lilly, TOTVS, Serasa Experian, BairesDev, Dr. Tis, NCS, Itaú, Vale, Bayer, BASF, Danone, Mercedes-Benz),
+  **nenhum** quadro foi encontrado com o `slug` óbvio (o método foi validado com um quadro conhecido). Nada foi acrescentado a `config/sources.json`: não se inventam `slug`s.
+  Essas empresas provavelmente usam outras plataformas (Gupy, Workday, Cia de Talentos).
+- **Gupy:** `portal.gupy.io/robots.txt` não restringe rastreadores e `portal.api.gupy.io` não publica `robots.txt`, mas a API do portal não é documentada
+  para uso público e os termos de uso não foram verificados. **Não foi implementado adaptador.** Alternativa segura: registrar vagas da Gupy como leads manualmente.

@@ -47,7 +47,7 @@ describe('migração 0009 (evidência de teste)', () => {
       .run(s.applicationId, 'a'.repeat(64), auth);
     const rows = old.prepare('SELECT * FROM email_dispatches').all();
     const apps = old.prepare('SELECT * FROM applications').all();
-    expect(runMigrations(old)).toEqual(['0009_email_test_evidence.sql']);
+    expect(runMigrations(old)).toEqual(['0009_email_test_evidence.sql', '0010_job_leads.sql']);
     expect(runMigrations(old)).toEqual([]);
     expect(old.prepare('SELECT * FROM applications').all()).toEqual(apps);
     expect(

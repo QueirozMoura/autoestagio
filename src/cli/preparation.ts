@@ -70,13 +70,13 @@ export function formatPrepareResult(result: PrepareResult): string {
   ].join('\n');
 }
 
-export function formatCandidates(items: readonly Candidate[]): string {
+export function formatCandidates(items: readonly Candidate[], explain = false): string {
   if (items.length === 0)
     return 'Nenhuma vaga elegível sem candidatura. Rode "analyze" para atualizar.';
   return items
-    .map(
-      (c) =>
-        `vaga ${c.jobId} [${c.verdict === 'apto' ? 'APTO' : 'REVISÃO HUMANA: exige --override-review'}] ${c.company ?? '?'} — ${c.title}`,
-    )
+    .map((c) => {
+      const head = `${String(c.position).padStart(2)}. vaga ${c.jobId} [${c.verdict === 'apto' ? 'APTO' : 'REVISÃO HUMANA: exige --override-review'}] ${c.company ?? '?'} — ${c.title}`;
+      return explain ? [head, ...c.explanation.map((line) => `      ${line}`)].join('\n') : head;
+    })
     .join('\n');
 }

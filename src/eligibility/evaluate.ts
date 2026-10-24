@@ -1,5 +1,11 @@
 import type { Profile } from '../config/index.js';
-import { AREA_LABELS, canonicalProfileAreas, classifyJobAreas, norm } from './areas.js';
+import {
+  AREA_LABELS,
+  canonicalProfileAreas,
+  classifyJobAreas,
+  norm,
+  type JobArea,
+} from './areas.js';
 import {
   courseCriteria,
   graduationCriteria,
@@ -21,7 +27,10 @@ import type {
 const BRAZIL = /(?:brasil|brazil|latam|latin america|sao paulo|\bbr\b)/;
 const FOREIGN =
   /\b(?:us|usa|united states|uk|united kingdom|canada|europe|emea|apac|india|mexico|argentina|colombia|germany|france|spain|portugal|ireland|singapore|australia)\b/;
-const OTHER_CITIES =
+/** Região metropolitana de São Paulo: o deslocamento até lá não é presumido; precisa de tempo confirmado. */
+export const GREATER_SP =
+  /\b(?:osasco|guarulhos|barueri|santo andre|sao bernardo do campo|sao caetano do sul|diadema|taboao da serra|embu das artes|cotia|carapicuiba|itapevi|jandira|santana de parnaiba|mauá|maua|mogi das cruzes|suzano|ferraz de vasconcelos|poa|aruja|itaquaquecetuba|franco da rocha|caieiras|cajamar|arujá|ribeirao pires|rio grande da serra|itapecerica da serra|santo amaro|grande sao paulo|regiao metropolitana)\b/;
+export const OTHER_CITIES =
   /\b(?:rio de janeiro|curitiba|belo horizonte|porto alegre|recife|florianopolis|campinas|brasilia|salvador|fortaleza|goiania|manaus|belem|vitoria|joinville|ribeirao preto|sao jose dos campos|santos|sorocaba)\b/;
 
 const money = (value: number): string =>
@@ -75,7 +84,7 @@ function areaCriterion(job: EligibilityJob, profile: Profile): Criterion {
   const base = { id: 'area', kind: 'obrigatorio' } as const;
   const wanted = canonicalProfileAreas(profile.areas);
   const classification = classifyJobAreas(job.title, job.description);
-  const label = (areas: readonly (keyof typeof AREA_LABELS)[]): string =>
+  const label = (areas: readonly JobArea[]): string =>
     areas.map((area) => AREA_LABELS[area]).join(', ');
 
   if (wanted.size === 0) {
@@ -92,9 +101,28 @@ function areaCriterion(job: EligibilityJob, profile: Profile): Criterion {
         };
   }
   if (classification.nonIt) {
-    return { ...base, outcome: 'nao_atende', detail: 'Título indica área fora de TI.' };
+    return {
+      ...base,
+      outcome: 'nao_atende',
+      detail: 'Título indica área fora de TI, sem sinal de TI no título nem na descrição.',
+    };
+  }
+  if (classification.conflict) {
+    return {
+      ...base,
+      outcome: 'indeterminado',
+      detail: `Título de área de negócio, mas a descrição cita ${label(classification.fromDescription)}: confirmar se a função é de TI.`,
+    };
   }
   if (classification.fromDescription.length > 0) {
+    const hit = classification.fromDescription.filter((area) => wanted.has(area));
+    if (classification.weakIt && hit.length > 0) {
+      return {
+        ...base,
+        outcome: 'atende',
+        detail: `Título sugere tecnologia e a descrição confirma ${label(hit)} (atividades e requisitos).`,
+      };
+    }
     return {
       ...base,
       outcome: 'indeterminado',
@@ -104,8 +132,8 @@ function areaCriterion(job: EligibilityJob, profile: Profile): Criterion {
   return {
     ...base,
     outcome: 'indeterminado',
-    detail: classification.genericIt
-      ? 'Vaga de tecnologia sem área específica identificável.'
+    detail: classification.weakIt
+      ? 'Título com sinal fraco de tecnologia e descrição sem atividades de TI identificáveis: confirmar.'
       : 'Não foi possível identificar a área da vaga.',
   };
 }
@@ -154,6 +182,17 @@ function placeCriteria(job: EligibilityJob, profile: Profile): Criterion[] {
   });
 
   if (mode === 'remoto') {
+    // Restrição de residência (ex.: "residir em Curitiba"): remoto no Brasil só vale se der para trabalhar de São Paulo.
+    const residence = residenceRestriction(job, city);
+    if (residence !== undefined) {
+      return [
+        modeCriterion,
+        place(
+          'indeterminado',
+          `Remoto com possível exigência de residência (${residence}): confirmar se pode atuar de ${profile.city.split(',')[0] ?? 'São Paulo'}.`,
+        ),
+      ];
+    }
     if (location === '' || BRAZIL.test(location)) {
       return [modeCriterion, place('atende', 'Remoto, sem restrição de local fora do Brasil.')];
     }
@@ -169,7 +208,7 @@ function placeCriteria(job: EligibilityJob, profile: Profile): Criterion[] {
     return [modeCriterion, place('atende', 'Remoto, sem restrição de local identificada.')];
   }
 
-  // híbrido ou presencial: precisa ser na cidade do perfil, e o deslocamento precisa ser verificável.
+  // híbrido ou presencial: precisa ser na cidade do perfil (ou local com tempo confirmado), e o deslocamento verificável.
   if (location === '') {
     return [modeCriterion, place('indeterminado', `Vaga ${mode} sem local informado.`)];
   }
@@ -180,10 +219,26 @@ function placeCriteria(job: EligibilityJob, profile: Profile): Criterion[] {
       commuteCriterion(job, profile),
     ];
   }
+  if (commuteMatches(job, profile).length > 0) {
+    return [
+      modeCriterion,
+      place('atende', `Local "${job.location}" consta entre os tempos confirmados no perfil.`),
+      commuteCriterion(job, profile),
+    ];
+  }
   if (OTHER_CITIES.test(location)) {
     return [
       modeCriterion,
       place('nao_atende', `Vaga ${mode} em "${job.location}", fora de ${profile.city}.`),
+    ];
+  }
+  if (GREATER_SP.test(location)) {
+    return [
+      modeCriterion,
+      place(
+        'indeterminado',
+        `Local "${job.location}" na região metropolitana: o deslocamento não é presumido; confirme o tempo (comando "locais registrar").`,
+      ),
     ];
   }
   return [
@@ -195,28 +250,63 @@ function placeCriteria(job: EligibilityJob, profile: Profile): Criterion[] {
   ];
 }
 
-function commuteCriterion(job: EligibilityJob, profile: Profile): Criterion {
-  const limit = profile.workModes.onsite.maxCommuteMinutesPerWay;
+const RESIDENCE =
+  /\b(?:residir|morar|reside|residente|moradores?|candidatos? (?:de|em|da|do|residentes))\s+(?:em|na|no|de|da|do)?\s*([a-z][a-z ]{2,40}?)(?:[.,;:)\n]|\se\b|$)/;
+const SAO_PAULO_OK = /\b(?:sao paulo|sp|brasil|brazil|qualquer (?:lugar|regiao|cidade))\b/;
+
+/** Texto da vaga exigindo residência fora de São Paulo? Devolve o trecho (mascarado a 40 caracteres) ou undefined. */
+function residenceRestriction(job: EligibilityJob, city: string): string | undefined {
+  const text = norm(`${job.location ?? ''}\n${job.description ?? ''}`);
+  const match = RESIDENCE.exec(text);
+  if (match === null) return undefined;
+  const place = (match[1] ?? '').trim();
+  if (place === '' || SAO_PAULO_OK.test(place) || (city !== '' && place.includes(city)))
+    return undefined;
+  return place.slice(0, 40);
+}
+
+export function commuteMatches(job: EligibilityJob, profile: Profile) {
   const haystack = norm(`${job.company ?? ''} ${job.location ?? ''}`);
-  const matches = (profile.commute ?? []).filter((entry) =>
+  return (profile.commute ?? []).filter((entry) =>
     entry.keywords.some((keyword) =>
       new RegExp(`\\b${norm(keyword).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`).test(haystack),
     ),
   );
+}
+
+function commuteCriterion(job: EligibilityJob, profile: Profile): Criterion {
+  const limit = profile.workModes.onsite.maxCommuteMinutesPerWay;
+  const reviewLimit = profile.workModes.onsite.reviewMaxCommuteMinutesPerWay ?? limit + 10;
+  const matches = commuteMatches(job, profile);
   const base = { id: 'deslocamento', kind: 'obrigatorio' } as const;
+  const origin = profile.home?.label === undefined ? '' : ` a partir de ${profile.home.label}`;
   if (matches.length === 0) {
     return {
       ...base,
       outcome: 'indeterminado',
-      detail: `Deslocamento não verificável: "${job.location ?? ''}" não consta nos tempos confirmados no perfil (limite ${limit} min por trecho).`,
+      detail: `Deslocamento não verificável${origin}: "${job.location ?? ''}" não consta nos tempos confirmados no perfil (adequado até ${limit} min por trecho; confirme com "locais registrar").`,
     };
   }
   // Mais de um local casando: vale o pior caso.
   const worst = matches.reduce((a, b) => (a.minutesPerWay >= b.minutesPerWay ? a : b));
+  const when = worst.confirmedAt === undefined ? '' : `, confirmado em ${worst.confirmedAt}`;
+  const where = `${worst.minutesPerWay} min por trecho${origin}; fonte: ${worst.source}${when}`;
+  if (worst.minutesPerWay <= limit)
+    return {
+      ...base,
+      outcome: 'atende',
+      detail: `Deslocamento verificado: ${where} (adequado até ${limit}).`,
+    };
+  if (worst.minutesPerWay <= reviewLimit)
+    return {
+      ...base,
+      outcome: 'indeterminado',
+      detail: `Deslocamento limítrofe: ${where} (${limit + 1} a ${reviewLimit} min: revisão manual).`,
+    };
   return {
     ...base,
-    outcome: worst.minutesPerWay <= limit ? 'atende' : 'nao_atende',
-    detail: `Deslocamento verificado: ${worst.minutesPerWay} min por trecho (limite ${limit}); fonte: ${worst.source}.`,
+    outcome: 'nao_atende',
+    detail: `Deslocamento verificado: ${where}; acima de ${reviewLimit} min, normalmente incompatível.`,
   };
 }
 

@@ -7,6 +7,7 @@ import {
   type Channel,
 } from '../applications/index.js';
 import type { CvReference, Profile } from '../config/index.js';
+import { rankCandidates } from '../eligibility/ranking.js';
 import type { Db } from '../db/index.js';
 import { analyzeJobs, profileHash as hashProfile, type Criterion } from '../eligibility/index.js';
 import { technologiesIn } from '../eligibility/requirements.js';
@@ -647,28 +648,53 @@ export interface Candidate {
   title: string;
   company: string | null;
   verdict: 'apto' | 'revisao_humana';
+  /** Posição no ranking transparente (1 = primeira). */
+  position: number;
+  /** Por que a vaga ficou nesta posição (uma linha por chave de ordenação). */
+  explanation: string[];
 }
 
-/** Vagas com análise atual, aptas ou em revisão, que ainda não têm candidatura. */
+/**
+ * Vagas com análise atual, aptas ou em revisão, que ainda não têm candidatura, na ordem do ranking transparente
+ * (elegibilidade, deslocamento, bolsa, requisitos/diferenciais, recência; a área não pesa).
+ */
 export function listCandidates(db: Db, profileHash: string): Candidate[] {
   const rows = db
     .prepare(
-      `SELECT j.id AS job_id, j.title, j.company, e.verdict
+      `SELECT j.id AS job_id, j.title, j.company, j.first_seen_at, e.verdict, e.criteria,
+              e.differentials_matched, e.differentials_total
          FROM job_eligibility e JOIN jobs j ON j.id = e.job_id
         WHERE e.verdict IN ('apto', 'revisao_humana') AND e.profile_hash = ?
-          AND NOT EXISTS (SELECT 1 FROM applications a WHERE a.job_id = j.id)
-        ORDER BY e.verdict, j.id`,
+          AND NOT EXISTS (SELECT 1 FROM applications a WHERE a.job_id = j.id)`,
     )
     .all(profileHash) as {
     job_id: number;
     title: string;
     company: string | null;
+    first_seen_at: string;
     verdict: Candidate['verdict'];
+    criteria: string;
+    differentials_matched: number;
+    differentials_total: number;
   }[];
-  return rows.map((row) => ({
-    jobId: row.job_id,
-    title: row.title,
-    company: row.company,
-    verdict: row.verdict,
+  const ranked = rankCandidates(
+    rows.map((row) => ({
+      jobId: row.job_id,
+      verdict: row.verdict,
+      criteria: JSON.parse(row.criteria) as Criterion[],
+      differentialsMatched: row.differentials_matched,
+      differentialsTotal: row.differentials_total,
+      firstSeenAt: row.first_seen_at,
+      title: row.title,
+      company: row.company,
+    })),
+  );
+  return ranked.map(({ item, position, explanation }) => ({
+    jobId: item.jobId,
+    title: item.title,
+    company: item.company,
+    verdict: item.verdict,
+    position,
+    explanation,
   }));
 }

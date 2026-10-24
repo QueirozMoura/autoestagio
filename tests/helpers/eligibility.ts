@@ -13,7 +13,7 @@ export const baseProfile: Record<string, unknown> = {
     currentSemester: 3,
   },
   level: 'estagio',
-  areas: ['desenvolvimento', 'qa', 'suporte-tecnico', 'infraestrutura', 'dados', 'banco-de-dados'],
+  areas: ['todas'],
   technologies: ['TypeScript', 'SQL', 'Git'],
   languages: [{ language: 'Inglês', level: 'intermediario' }],
   availability: { hoursPerWeek: { min: 20, max: 30 }, startFrom: '2026-12-01' },

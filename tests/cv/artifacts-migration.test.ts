@@ -141,7 +141,11 @@ describe('migração 0008: aplicação e compatibilidade', () => {
       old.prepare('SELECT * FROM jobs ORDER BY id').all(),
     ];
     const before = snapshot();
-    expect(runMigrations(old)).toEqual(['0008_cv_artifacts.sql', '0009_email_test_evidence.sql']);
+    expect(runMigrations(old)).toEqual([
+      '0008_cv_artifacts.sql',
+      '0009_email_test_evidence.sql',
+      '0010_job_leads.sql',
+    ]);
     expect(snapshot()).toEqual(before);
     expect(old.pragma('foreign_key_check')).toEqual([]);
     expect((old.prepare('SELECT COUNT(*) AS n FROM cv_artifacts').get() as { n: number }).n).toBe(

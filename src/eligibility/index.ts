@@ -1,4 +1,13 @@
-export { AREAS, AREA_LABELS, canonicalProfileAreas, classifyJobAreas, type Area } from './areas.js';
+export {
+  AREAS,
+  AREA_LABELS,
+  JOB_AREAS,
+  canonicalProfileAreas,
+  classifyJobAreas,
+  unknownProfileAreas,
+  type Area,
+  type JobArea,
+} from './areas.js';
 export { evaluateJob } from './evaluate.js';
 export { segmentDescription, strengthOf, type Context, type Segment } from './segments.js';
 export {

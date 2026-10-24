@@ -36,10 +36,18 @@ import {
   markReviewed,
   prepareApplication,
 } from '../preparation/index.js';
-import { analyzeJobs, profileHash, VERDICTS, type Verdict } from '../eligibility/index.js';
+import {
+  analyzeJobs,
+  profileHash,
+  unknownProfileAreas,
+  VERDICTS,
+  type Verdict,
+} from '../eligibility/index.js';
 import { loadSourcesConfig } from '../sources/index.js';
 import { formatAnalysis } from './analyze.js';
 import { registerApplyCommands } from './apply-commands.js';
+import { registerLeadCommands } from './leads.js';
+import { registerLocationCommands } from './locais.js';
 import { registerCvCommands } from './cv-commands.js';
 import { registerEmailCommands } from './email-commands.js';
 import { formatCandidates, formatPrepareResult, formatPreview } from './preparation.js';
@@ -210,6 +218,11 @@ program
         profile = { ...loaded, approval: undefined };
       }
     }
+    const unknownAreas = unknownProfileAreas(loaded.areas);
+    if (unknownAreas.length > 0)
+      console.warn(
+        `Aviso: áreas do perfil não reconhecidas (ignoradas): ${unknownAreas.join(', ')}.`,
+      );
     if (
       options.verdict !== undefined &&
       !(VERDICTS as readonly string[]).includes(options.verdict)
@@ -350,10 +363,18 @@ function approvedContext(): { profile: Profile; cv: CvReference } {
 
 applications
   .command('candidates')
-  .description('Lista vagas elegíveis (aptas ou em revisão) que ainda não têm candidatura')
-  .action(() => {
+  .description(
+    'Lista vagas elegíveis (aptas ou em revisão) sem candidatura, em ordem transparente (a área não pesa)',
+  )
+  .option('--explain', 'mostra por que cada vaga ficou nesta posição')
+  .action((options: { explain?: boolean }) => {
     const { profile } = approvedContext();
-    console.log(formatCandidates(withDb((db) => listCandidates(db, profileHash(profile)))));
+    console.log(
+      formatCandidates(
+        withDb((db) => listCandidates(db, profileHash(profile))),
+        options.explain === true,
+      ),
+    );
   });
 
 applications
@@ -476,6 +497,8 @@ async function withDbAsync<T>(fn: (db: ReturnType<typeof openDatabase>) => Promi
 registerEmailCommands(program, { withDb, withDbAsync, parseId });
 registerCvCommands(program);
 registerApplyCommands(program, { withDbAsync, parseId });
+registerLocationCommands(program, { withDb });
+registerLeadCommands(program, { withDb, parseId });
 
 try {
   await program.parseAsync();

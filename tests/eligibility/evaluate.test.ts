@@ -25,7 +25,9 @@ describe('evaluateJob — veredito', () => {
   it('inapto pelo requisito obrigatório que não é atendido, listando os motivos', () => {
     const result = evaluate(job({ title: 'Estagiário de Marketing' }));
     expect(result.verdict).toBe('inapto');
-    expect(result.reasons).toEqual(['Título indica área fora de TI.']);
+    expect(result.reasons).toEqual([
+      'Título indica área fora de TI, sem sinal de TI no título nem na descrição.',
+    ]);
   });
 
   it('diferenciais nunca mudam o veredito, só a contagem', () => {
@@ -50,7 +52,7 @@ describe('área', () => {
     ['Customer Success Intern', 'nao_atende'],
     ['Estágio em Redes Sociais', 'nao_atende'],
     ['Programa de Estágio 2027', 'indeterminado'],
-    ['Estágio em TI', 'indeterminado'],
+    ['Estágio em TI', 'atende'],
   ])('%s → %s', (title, expected) => {
     expect(find(evaluate(job({ title })).criteria, 'area')?.outcome).toBe(expected);
   });
@@ -134,13 +136,23 @@ describe('modalidade, local e deslocamento', () => {
     expect(result.verdict).toBe('apto');
   });
 
-  it('deslocamento acima de 70 min reprova', () => {
-    const slow = profile({
-      commute: [{ keywords: ['pinheiros'], minutesPerWay: 71, source: 'teste' }],
-    });
-    const result = run({ workMode: 'presencial' }, slow);
-    expect(find(result.criteria, 'deslocamento')?.outcome).toBe('nao_atende');
-    expect(result.verdict).toBe('inapto');
+  it('de 71 a 80 min vai para revisão manual; acima de 80 é incompatível', () => {
+    const at = (minutes: number) =>
+      run(
+        { workMode: 'presencial' },
+        profile({
+          commute: [{ keywords: ['pinheiros'], minutesPerWay: minutes, source: 'teste' }],
+        }),
+      );
+    for (const minutes of [71, 80]) {
+      const result = at(minutes);
+      expect(find(result.criteria, 'deslocamento')?.outcome).toBe('indeterminado');
+      expect(find(result.criteria, 'deslocamento')?.detail).toContain('revisão manual');
+      expect(result.verdict).toBe('revisao_humana');
+    }
+    const far = at(81);
+    expect(find(far.criteria, 'deslocamento')?.outcome).toBe('nao_atende');
+    expect(far.verdict).toBe('inapto');
   });
 
   it('70 min exatos ainda atende', () => {
