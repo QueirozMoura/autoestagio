@@ -135,3 +135,16 @@ Investigadas e **não adotadas**:
 Lições: a maioria dos estágios encontrados é de programas gerais de bancos, **sem área, bolsa ou modalidade na
 vaga**. O extrator agora lê frases declarativas da descrição ("modelo 100% presencial", "estagiar presencialmente") e
 o bairro/rua escritos ("na região dos Jardins"), sem deduzir nada. Use `autonomo sources` para medir cada fonte.
+
+## Canal de candidatura automatizável: o que a investigação mostrou (2026-10-24)
+
+Das 44 vagas coletadas, **0** têm e-mail de candidatura utilizável. Os portais que concentram estágio em TI não
+permitem candidatura automática legítima: Greenhouse e Lever exigem chave de API da empresa para enviar, e os
+formulários de Greenhouse, Lever, Ashby, Inhire e Gupy usam reCAPTCHA, hCaptcha ou login. Buscas por vagas com
+"envie seu currículo para" não revelaram fonte pública estruturada; o GitHub (`frontendbr/vagas` etc.) quase não traz
+estágio. Fontes públicas úteis para **descoberta** (não para envio) continuam sendo as APIs de quadros de vagas; o
+envio autônomo só é possível onde a própria vaga publica um e-mail de candidatura em contexto de candidatura.
+
+Causas das pendências (medidas por `autonomo diagnose`): modalidade e bolsa estão ausentes porque os anúncios são
+genéricos (programas gerais de bancos e consultorias); a única lacuna real do extrator era a modalidade em inglês
+("Location: Hybrid role"), já corrigida. Vagas afirmativas (título) ficam pendentes: o perfil não declara identidade.

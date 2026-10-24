@@ -5,8 +5,14 @@ import type { EmailContext } from '../email/index.js';
 import { analyzeJobs, profileHash } from '../eligibility/index.js';
 import { listCandidates } from '../preparation/index.js';
 import { attemptEmail, discoverRecipient } from './email-connector.js';
-import { decideJob, type DecisionKind, type JobFacts } from './decide.js';
+import { decideJob, type DecisionKind } from './decide.js';
 import { latestGrant } from './grant.js';
+import {
+  classifyOpportunities,
+  loadFacts,
+  summarizeOpportunities,
+  type OpportunitySummary,
+} from './opportunities.js';
 import { freshSummary, type FreshSummary } from './metrics.js';
 import { policyHash, realAuthorization, type GrantFacts, type Policy } from './policy.js';
 
@@ -75,24 +81,12 @@ export interface RunReport {
   discards: { reason: string; count: number }[];
   /** Vagas vistas pela primeira vez NESTA execução (o que a coleta trouxe de novo). */
   fresh: FreshSummary;
+  /** As quatro categorias sobre TODAS as vagas ainda sem candidatura (não só as novas). */
+  opportunities: OpportunitySummary;
   grantId: number | null;
   errors: string[];
   stopped: boolean;
   notes: string[];
-}
-
-interface Row {
-  id: number;
-  title: string;
-  company: string | null;
-  work_mode: JobFacts['workMode'];
-  stipend_amount: number | null;
-  description: string | null;
-  url: string;
-  apply_url: string | null;
-  source_kind: string;
-  verdict: JobFacts['verdict'];
-  criteria: string;
 }
 
 const REAL_DONE: readonly string[] = ['enviada', 'envio_incerto'];
@@ -166,6 +160,7 @@ export async function runAutonomous(options: RunOptions): Promise<RunReport> {
     limits: { perRun: 0, perDay: 0, sentToday: 0, effective: 0 },
     discards: [],
     fresh: { total: 0, inIt: 0, apto: 0, pendente: 0, descartada: 0, automatable: 0 },
+    opportunities: summarizeOpportunities([]),
     grantId: grant?.id ?? null,
     errors: [],
     stopped: false,
@@ -230,19 +225,7 @@ export async function runAutonomous(options: RunOptions): Promise<RunReport> {
       ...resumable.map((id) => ({ jobId: id })),
       ...listCandidates(db, profileHash(profile)).filter((c) => !resumable.includes(c.jobId)),
     ];
-    const byId = new Map(
-      (
-        db
-          .prepare(
-            `SELECT j.id, j.title, j.company, j.work_mode, j.stipend_amount, j.description, j.url,
-                    j.apply_url, s.kind AS source_kind, e.verdict, e.criteria
-               FROM jobs j JOIN sources s ON s.id = j.source_id
-               JOIN job_eligibility e ON e.job_id = j.id
-              WHERE e.profile_hash = ?`,
-          )
-          .all(profileHash(profile)) as Row[]
-      ).map((row) => [row.id, row]),
-    );
+    const factsById = loadFacts(db, profile);
 
     let accepted = 0;
     const insert = db.prepare(
@@ -256,23 +239,11 @@ export async function runAutonomous(options: RunOptions): Promise<RunReport> {
         notes.push('Parada solicitada: execução encerrada com segurança.');
         break;
       }
-      const row = byId.get(candidate.jobId);
-      if (row === undefined) continue;
+      const facts = factsById.get(candidate.jobId);
+      if (facts === undefined) continue;
+      const row = { id: facts.id, company: facts.company, title: facts.title };
       // Só endereço escrito na descrição oficial da vaga (um único e-mail corporativo); nada é deduzido.
       discoverRecipient(db, row.id, clock());
-      const facts: JobFacts = {
-        id: row.id,
-        title: row.title,
-        company: row.company,
-        workMode: row.work_mode,
-        stipend: row.stipend_amount,
-        description: row.description,
-        url: row.url,
-        applyUrl: row.apply_url,
-        sourceKind: row.source_kind,
-        verdict: row.verdict,
-        criteria: JSON.parse(row.criteria) as JobFacts['criteria'],
-      };
       let decision: StoredDecision;
       let reasons: string[];
       let persisted = false;
@@ -381,6 +352,7 @@ export async function runAutonomous(options: RunOptions): Promise<RunReport> {
     report.discards = [...discards.entries()]
       .map(([reason, count]) => ({ reason, count }))
       .sort((x, y) => y.count - x.count);
+    report.opportunities = summarizeOpportunities(classifyOpportunities(db, profile, policy));
     report.status = report.stopped ? 'interrompida' : 'concluida';
   } catch (error) {
     report.status = 'falhou';
@@ -399,6 +371,7 @@ export async function runAutonomous(options: RunOptions): Promise<RunReport> {
       limits: report.limits,
       grantId: report.grantId,
       fresh: report.fresh,
+      opportunities: report.opportunities,
       discards: report.discards,
       errors: report.errors,
       stopped: report.stopped,

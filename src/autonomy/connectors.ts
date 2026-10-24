@@ -1,4 +1,5 @@
 import type { Db } from '../db/index.js';
+import { candidateEmail } from './email-connector.js';
 
 /**
  * Conectores de envio. Cada um diz se PODE enviar a candidatura de uma vaga e por quê. Nenhum conector deste arquivo
@@ -10,6 +11,8 @@ export interface ConnectorJob {
   id: number;
   url: string;
   applyUrl: string | null;
+  /** Descrição da vaga: permite reconhecer, sem gravar nada, um e-mail de candidatura utilizável. */
+  description?: string | null;
 }
 
 export interface Availability {
@@ -81,13 +84,21 @@ const email: Connector = {
           WHERE job_id = ? AND (freemail = 0 OR freemail_confirmed = 1) LIMIT 1`,
       )
       .get(job.id);
-    return row === undefined
-      ? { available: false, reason: 'sem destinatário de e-mail verificado para esta vaga' }
-      : {
-          available: true,
-          reason:
-            'destinatário verificado; o envio segue as travas do canal de e-mail (autorização e trava mestra)',
-        };
+    if (row === undefined) {
+      const found = candidateEmail(job.description ?? null);
+      return found.ok
+        ? {
+            available: true,
+            reason:
+              'e-mail de candidatura escrito na vaga (será verificado antes do envio, com todas as travas do canal)',
+          }
+        : { available: false, reason: found.reason };
+    }
+    return {
+      available: true,
+      reason:
+        'destinatário verificado; o envio segue as travas do canal de e-mail (autorização e trava mestra)',
+    };
   },
 };
 

@@ -8,7 +8,9 @@ import {
   GrantError,
   RunRefused,
   createGrant,
+  classifyOpportunities,
   diagnose,
+  extractionCauses,
   latestGrant,
   listGrants,
   listRuns,
@@ -19,6 +21,8 @@ import {
   runAutonomous,
   runDecisions,
   sourceMetrics,
+  summarizeOpportunities,
+  type Bucket,
   type DecisionLine,
   type DiscoverySummary,
   type RunReport,
@@ -46,6 +50,16 @@ const LABELS: Record<string, string> = {
   envio_incerto: 'ENVIO INCERTO (confira; nunca é reenviada)',
 };
 
+const BUCKET_LABELS: Record<Bucket, string> = {
+  automatizavel: 'elegível com candidatura AUTOMATIZÁVEL',
+  manual: 'elegível, candidatura MANUAL',
+  insuficiente: 'informações INSUFICIENTES',
+  incompativel: 'INCOMPATÍVEL com o perfil',
+};
+
+const bucketLine = (b: Record<Bucket, number>): string =>
+  (Object.keys(BUCKET_LABELS) as Bucket[]).map((k) => `${BUCKET_LABELS[k]}: ${b[k]}`).join('; ');
+
 const line = (d: DecisionLine): string =>
   `  vaga ${d.jobId} [${LABELS[d.decision] ?? d.decision}] ${d.company ?? '?'} — ${d.title}\n` +
   `      ${d.reasons.join(' | ')}` +
@@ -63,6 +77,7 @@ export function formatRunReport(report: RunReport): string {
     );
   out.push(
     `Novas nesta execução: ${report.fresh.total} vaga(s) — em TI: ${report.fresh.inIt}; aptas: ${report.fresh.apto}; pendentes: ${report.fresh.pendente}; descartadas: ${report.fresh.descartada}; com canal automatizável (e-mail): ${report.fresh.automatable}.`,
+    `Categorias (todas as ${report.opportunities.total} vagas sem candidatura): ${bucketLine(report.opportunities.buckets)}.`,
     `Análise: ${report.analyzed} vaga(s) — ${Object.entries(report.verdicts)
       .map(([k, v]) => `${k}: ${v}`)
       .join(', ')}; já com candidatura: ${report.alreadyApplied}.`,
@@ -83,6 +98,12 @@ export function formatRunReport(report: RunReport): string {
   show('pendente_canal', 'Dentro da política, sem canal automático (candidatura manual)');
   show('pendente', 'Pendentes (precisam de informação ou de um portão resolvido)');
   show('limite_atingido', 'Acima do limite');
+  if (report.opportunities.blockers.length > 0)
+    out.push(
+      '',
+      'Principais bloqueios (vagas com informações insuficientes, por dado obrigatório que falta):',
+      ...report.opportunities.blockers.map((b) => `  ${String(b.count).padStart(3)}× ${b.id}`),
+    );
   if (report.discards.length > 0)
     out.push(
       '',
@@ -244,6 +265,12 @@ export function registerAutonomoCommands(program: Command, { withDb, withDbAsync
         'Vagas só com dados ausentes, pelo conjunto do que falta:',
         ...result.missingSets.map((m) => `  ${m.jobs}× falta: ${m.missing.join(' + ')}`),
         '',
+        'Causa das pendências de área, modalidade e bolsa (anúncio genérico x menção que o extrator não trata como regra):',
+        ...withDb((db) => extractionCauses(db, profile)).flatMap((c) => [
+          `  ${c.criterion}: ${c.pending} pendente(s) — ${c.generic} sem nenhuma menção (anúncio genérico), ${c.mentioned} com menção não declarativa`,
+          ...c.samples.map((x) => `      #${x.jobId}: …${x.snippet}…`),
+        ]),
+        '',
         ...result.whatIf.map(
           (w) =>
             `Se "${w.tolerate.join(', ')}" desconhecido(a) fosse tolerado(a) (rules.tolerateUnknown), ${w.wouldBeApto} vaga(s) seriam aptas. Nada é relaxado sem a sua decisão.`,
@@ -262,21 +289,72 @@ export function registerAutonomoCommands(program: Command, { withDb, withDbAsync
     .action((options: { days: string; json?: boolean }) => {
       const { profile } = profileForRun(loadConfig().profilePath);
       const days = Math.max(1, Number(options.days) || 7);
-      const rows = withDb((db) => sourceMetrics(db, profile, days));
+      const policy = loadPolicy();
+      const { rows, summary } = withDb((db) => ({
+        rows: sourceMetrics(db, profile, days),
+        summary: summarizeOpportunities(classifyOpportunities(db, profile, policy)),
+      }));
+      const byBucket = new Map(summary.bySource.map((x) => [x.source, x.buckets]));
       if (options.json === true) {
-        console.log(JSON.stringify(rows, null, 2));
+        console.log(
+          JSON.stringify(
+            rows.map((m) => ({ ...m, categorias: byBucket.get(m.source) })),
+            null,
+            2,
+          ),
+        );
         return;
       }
       console.log(
         [
-          `Fontes (janela de ${days} dia(s)); "relevantes" = estágio em TI não inapto; "autom." = tem e-mail de candidatura utilizável:`,
-          'fonte                           vagas  novas  emTI  relev  apto  pend  inapto  autom.  coletas(erros)',
-          ...rows.map(
-            (m) =>
-              `${m.source.padEnd(30)} ${String(m.jobs).padStart(6)} ${String(m.newInWindow).padStart(6)} ${String(m.inIt).padStart(5)} ${String(m.relevant).padStart(6)} ${String(m.apto).padStart(5)} ${String(m.pendente).padStart(5)} ${String(m.inapto).padStart(7)} ${String(m.automatable).padStart(7)}  ${m.runsInWindow}(${m.errorsInWindow})`,
-          ),
+          `Fontes (janela de ${days} dia(s)). autom. = elegível com e-mail utilizável; manual = elegível por formulário/portal; insuf. = faltam dados; incomp. = fora do perfil.`,
+          'fonte                                    vagas  novas  emTI  autom.  manual  insuf.  incomp.  coletas(erros)',
+          ...rows.map((m) => {
+            const b = byBucket.get(m.source) ?? {
+              automatizavel: 0,
+              manual: 0,
+              insuficiente: 0,
+              incompativel: 0,
+            };
+            return `${m.source.padEnd(40)} ${String(m.jobs).padStart(5)} ${String(m.newInWindow).padStart(6)} ${String(m.inIt).padStart(5)} ${String(b.automatizavel).padStart(7)} ${String(b.manual).padStart(7)} ${String(b.insuficiente).padStart(7)} ${String(b.incompativel).padStart(8)}  ${m.runsInWindow}(${m.errorsInWindow})`;
+          }),
         ].join('\n'),
       );
+    });
+
+  cmd
+    .command('opportunities')
+    .description(
+      'Lista as vagas sem candidatura nas 4 categorias (automatizável, manual, insuficiente, incompatível)',
+    )
+    .option('--categoria <c>', 'automatizavel, manual, insuficiente ou incompativel')
+    .option('--json', 'saída em JSON')
+    .action((options: { categoria?: string; json?: boolean }) => {
+      const { profile } = profileForRun(loadConfig().profilePath);
+      const policy = loadPolicy();
+      const list = withDb((db) => classifyOpportunities(db, profile, policy)).filter(
+        (o) => options.categoria === undefined || o.bucket === options.categoria,
+      );
+      if (options.json === true) {
+        console.log(JSON.stringify(list, null, 2));
+        return;
+      }
+      const out: string[] = [];
+      for (const bucket of Object.keys(BUCKET_LABELS) as Bucket[]) {
+        const rows = list.filter((o) => o.bucket === bucket);
+        if (rows.length === 0) continue;
+        out.push(`${BUCKET_LABELS[bucket]} (${rows.length}):`);
+        for (const o of rows)
+          out.push(
+            `  vaga ${o.jobId} [${o.source}] ${o.company ?? '?'} — ${o.title}`,
+            `      ${o.reasons[0] ?? ''}${o.missing.length > 0 ? ` | falta: ${o.missing.join(', ')}` : ''}`,
+            ...(o.bucket === 'automatizavel' || o.bucket === 'manual'
+              ? [`      link: ${o.url}`]
+              : []),
+          );
+        out.push('');
+      }
+      console.log(out.length === 0 ? 'Nenhuma vaga.' : out.join('\n'));
     });
 
   cmd

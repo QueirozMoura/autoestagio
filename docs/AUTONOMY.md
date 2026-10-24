@@ -44,6 +44,14 @@ bloqueia e fica pendente: o modo autônomo não aplica liberações humanas. Cad
 
 Portais (`inhire`, `gupy`, `greenhouse`, `lever`, `ashby`) ficam **indisponíveis**: reCAPTCHA, login ou chave da empresa.
 
+## As quatro categorias
+
+`autonomo opportunities` (e o relatório) separam as vagas sem candidatura em: **elegível com candidatura
+automatizável** (e-mail de candidatura utilizável), **elegível, candidatura manual** (formulário/portal),
+**informações insuficientes** (falta dado obrigatório comprovado, inclusive vaga afirmativa: autodeclaração nunca é
+presumida) e **incompatível**. `autonomo sources` mostra as categorias por fonte e `autonomo diagnose` mede se cada
+pendência de área, modalidade e bolsa vem de anúncio genérico ou de menção que o extrator não trata como regra.
+
 ## Decisões e relatório
 
 `candidatar` (simulação) · `enviada` · `envio_incerto` · `pendente_canal` · `pendente` · `descartada` ·

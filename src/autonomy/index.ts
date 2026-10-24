@@ -18,7 +18,21 @@ export {
   type FreshSummary,
   type SourceMetric,
 } from './metrics.js';
-export { diagnose, type Diagnosis, type JobDiagnosis } from './diagnose.js';
+export {
+  diagnose,
+  extractionCauses,
+  type Diagnosis,
+  type ExtractionCause,
+  type JobDiagnosis,
+} from './diagnose.js';
+export {
+  classifyOpportunities,
+  loadFacts,
+  summarizeOpportunities,
+  type Bucket,
+  type Opportunity,
+  type OpportunitySummary,
+} from './opportunities.js';
 export {
   attemptEmail,
   candidateEmail,

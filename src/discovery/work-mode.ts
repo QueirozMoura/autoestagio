@@ -44,6 +44,9 @@ const DECLARATIVE = [
   /\b(?:modelo|regime|formato|jornada|modalidade)(?:\s+de\s+(?:trabalho|estagio))?\s+(?:sera\s+|e\s+|:\s*)?(?:100%\s*)?(hibrid[oa]s?|remot[oa]s?|presencial)\b/g,
   /\b(?:estagiar|trabalhar|atuar)\s+(?:de\s+forma\s+|em\s+modelo\s+|em\s+regime\s+)?(presencialmente|remotamente|hibrid[oa]|presencial|remoto)\b/g,
   /\b(?:vaga|estagio|posicao)\s+(?:100%\s*)?(presencial|hibrid[oa]|remot[oa])\b/g,
+  // Inglês: "Location: Hybrid role based in São Paulo", "This is a remote internship".
+  /\b(?:location|work model|work arrangement|work setup)\s*[:-]\s*(hybrid|remote|on-?site)\b/g,
+  /\b(?:a|an|this is an?)\s+(hybrid|remote|on-?site)\s+(?:role|position|internship|opportunity)\b/g,
 ];
 
 function declarativeIn(description: string): WorkMode | null {
@@ -54,9 +57,9 @@ function declarativeIn(description: string): WorkMode | null {
       const word = match[1] ?? '';
       const before = normalized.slice(Math.max(0, match.index - 30), match.index);
       if (NEGATION_BEFORE.test(before) || NEGATION_NEAR.test(before)) continue;
-      if (word.startsWith('hibrid')) found.add('hibrido');
+      if (word.startsWith('hibrid') || word === 'hybrid') found.add('hibrido');
       else if (word.startsWith('remot')) found.add('remoto');
-      else if (word.startsWith('presencial')) found.add('presencial');
+      else if (word.startsWith('presencial') || word.startsWith('on')) found.add('presencial');
     }
   }
   return resolve(found);

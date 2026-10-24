@@ -11,6 +11,7 @@ export type CriterionKind = 'obrigatorio' | 'diferencial';
 
 export type CriterionId =
   | 'perfil'
+  | 'afirmativa'
   | 'area'
   | 'bolsa'
   | 'modalidade'

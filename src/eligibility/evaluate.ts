@@ -37,6 +37,27 @@ export const OTHER_CITIES =
 const money = (value: number): string =>
   `R$ ${value.toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`;
 
+const AFFIRMATIVE =
+  /\b(?:afirmativ[ao]|exclusiv[ao]\s+(?:para|a)\b|pcd|pessoas?\s+com\s+defici[eê]ncia)/;
+
+/**
+ * Vaga afirmativa ou exclusiva para um grupo (declarada no TÍTULO): só serve a quem se enquadra. O perfil não
+ * declara isso e nada é presumido; fica pendente para você confirmar. "Vaga também para PcD" não restringe.
+ */
+function affirmativeCriterion(job: EligibilityJob): Criterion[] {
+  const title = norm(job.title);
+  if (!AFFIRMATIVE.test(title) || /\btambem\b/.test(title)) return [];
+  return [
+    {
+      id: 'afirmativa',
+      kind: 'obrigatorio',
+      outcome: 'indeterminado',
+      detail:
+        'Vaga afirmativa/exclusiva para um grupo: o perfil não declara se você se enquadra e nada é presumido; confirme antes de candidatar.',
+    },
+  ];
+}
+
 function stipendCriterion(job: EligibilityJob, profile: Profile): Criterion {
   const minimum = profile.minStipend.amount;
   const base = { id: 'bolsa', kind: 'obrigatorio' } as const;
@@ -362,6 +383,7 @@ export function evaluateJob(
   const criteria: Criterion[] = [
     areaCriterion(job, profile),
     stipendCriterion(job, profile),
+    ...affirmativeCriterion(job),
     ...placeCriteria(job, profile),
     ...courseCriteria(segments, profile),
     ...semesterCriteria(segments, profile),

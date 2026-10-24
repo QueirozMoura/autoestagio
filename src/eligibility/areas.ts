@@ -123,7 +123,7 @@ const WEAK_TITLE =
  * sinal forte de TI; sinais fracos ("digital", "sistemas") não o protegem.
  */
 const NON_IT =
-  /\b(marketing|redes sociais|comercial|vendas?|sales|financ\w*|contab\w*|juridic\w*|rh|recursos humanos|people|atendimento|logistic\w*|administrativ\w*|customer (?:success|service|experience|support)|social media|conteudo|content|jornalis\w*|direito|ugc|creative|criativ\w*|audio|design|payroll|corporate desk|wealth|onboarding|workplace|compliance|operac\w*|operations|growth|brand|comunicacao|engenharia (?:de producao|civil|quimica|mecanica|eletrica|ambiental|de materiais|de alimentos|de minas|de petroleo)|manutencao|utilidades|obras|enfermagem|saude|psicologia|arquitetura|varejo|compras|suprimentos|projetos?|processos)\b/;
+  /\b(marketing|redes sociais|comercial|vendas?|sales|financ\w*|contab\w*|juridic\w*|rh|recursos humanos|people|atendimento|logistic\w*|administrativ\w*|customer (?:success|service|experience|support)|social media|conteudo|content|jornalis\w*|direito|ugc|creative|criativ\w*|audio|design|payroll|corporate desk|wealth|onboarding|workplace|compliance|operac\w*|operations|growth|brand|comunicacao|engenharia (?:de producao|civil|quimica|mecanica|eletrica|ambiental|de materiais|de alimentos|de minas|de petroleo)|manutencao|utilidades|obras|enfermagem|saude|psicologia|arquitetura|varejo|compras|suprimentos|projetos?|processos|equity research|credito|cobranca|tesouraria|investimentos?|private banking|middle office|back office|atuarial|previdencia|seguridade|rpps|poder publico|capacitacao|treinamento|recrutamento|talentos)\b/;
 
 /**
  * Termos ESPECÍFICOS de atividade/requisito na descrição, por área. Palavras genéricas ("tecnologia", "software",

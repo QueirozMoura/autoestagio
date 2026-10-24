@@ -86,8 +86,14 @@ export function decideJob(db: Db, policy: Policy, job: JobFacts): Decision {
     verdict = 'apto';
 
   if (!rules.verdicts.includes(verdict)) {
+    // Só o que de fato bloqueia: o que a política tolera (bolsa desconhecida) não entra na lista.
     const open = job.criteria
-      .filter((c) => c.kind === 'obrigatorio' && c.outcome === 'indeterminado')
+      .filter(
+        (c) =>
+          c.kind === 'obrigatorio' &&
+          c.outcome === 'indeterminado' &&
+          !(rules.tolerateUnknown as readonly string[]).includes(c.id),
+      )
       .map((c) => c.detail);
     return {
       kind: 'pendente',

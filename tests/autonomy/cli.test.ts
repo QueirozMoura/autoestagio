@@ -19,6 +19,7 @@ describe('CLI autonomo', () => {
       'diagnose',
       'grant',
       'history',
+      'opportunities',
       'resume',
       'revoke',
       'run',
@@ -61,6 +62,14 @@ describe('CLI autonomo', () => {
       limits: { perRun: 5, perDay: 10, sentToday: 0, effective: 5 },
       discards: [{ reason: 'elegibilidade: área fora de TI', count: 3 }],
       grantId: null,
+      opportunities: {
+        total: 4,
+        buckets: { automatizavel: 1, manual: 1, insuficiente: 1, incompativel: 1 },
+        eligible: 2,
+        blockers: [{ id: 'area', count: 1 }],
+        incompatible: [],
+        bySource: [],
+      },
       fresh: { total: 4, inIt: 3, apto: 1, pendente: 2, descartada: 1, automatable: 1 },
       errors: [],
       stopped: false,
@@ -69,6 +78,8 @@ describe('CLI autonomo', () => {
     const out = formatRunReport(report);
     expect(out).toContain('simulação: nada é enviado');
     expect(out).toContain('candidatura manual');
+    expect(out).toContain('elegível com candidatura AUTOMATIZÁVEL: 1');
+    expect(out).toContain('1× area');
     expect(out).toContain('Novas nesta execução: 4 vaga(s) — em TI: 3');
     expect(out).toContain('3× elegibilidade: área fora de TI');
   });

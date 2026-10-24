@@ -110,3 +110,65 @@ export function diagnose(db: Db, profile: Profile): Diagnosis {
     jobs,
   };
 }
+
+/**
+ * Causa das pendências de área, modalidade e bolsa: o anúncio é genérico (nada a extrair) ou há menção que o extrator
+ * deliberadamente não trata como regra da vaga (para você conferir se vale ampliar o extrator). Somente leitura.
+ */
+export interface ExtractionCause {
+  criterion: 'area' | 'modalidade' | 'bolsa';
+  pending: number;
+  /** Nenhuma menção no texto: o anúncio não informa. */
+  generic: number;
+  /** Há menção, mas não declarativa/numérica (condicional, genérica, só a categoria); o extrator não presume. */
+  mentioned: number;
+  samples: { jobId: number; snippet: string }[];
+}
+
+const MENTION: Record<ExtractionCause['criterion'], RegExp> = {
+  modalidade:
+    /(h[ií]brid\w*|presencial\w*|remot[oa]s?|home ?office|on-?site|hybrid|escrit[oó]rio)/i,
+  bolsa: /(bolsa|R\$\s?\d|sal[aá]rio|remunera[cç][aã]o|stipend|compensation)/i,
+  area: /(tecnologia|\bTI\b|software|dados|data|desenvolvimento|sistemas|infraestrutura|seguran[cç]a da informa)/i,
+};
+
+export function extractionCauses(db: Db, profile: Profile): ExtractionCause[] {
+  const rows = db
+    .prepare(
+      `SELECT e.job_id, j.description, e.criteria
+         FROM job_eligibility e JOIN jobs j ON j.id = e.job_id
+        WHERE e.profile_hash = ? AND e.verdict = 'revisao_humana'`,
+    )
+    .all(profileHash(profile)) as {
+    job_id: number;
+    description: string | null;
+    criteria: string;
+  }[];
+  const out: ExtractionCause[] = (['area', 'modalidade', 'bolsa'] as const).map((criterion) => ({
+    criterion,
+    pending: 0,
+    generic: 0,
+    mentioned: 0,
+    samples: [],
+  }));
+  for (const row of rows) {
+    const criteria = JSON.parse(row.criteria) as Criterion[];
+    const text = (row.description ?? '').replace(/\s+/g, ' ');
+    for (const cause of out) {
+      const criterion = criteria.find((c) => c.id === cause.criterion);
+      if (criterion?.outcome !== 'indeterminado') continue;
+      cause.pending++;
+      const match = MENTION[cause.criterion].exec(text);
+      if (match === null) cause.generic++;
+      else {
+        cause.mentioned++;
+        if (cause.samples.length < 3)
+          cause.samples.push({
+            jobId: row.job_id,
+            snippet: text.slice(Math.max(0, match.index - 50), match.index + 70),
+          });
+      }
+    }
+  }
+  return out;
+}

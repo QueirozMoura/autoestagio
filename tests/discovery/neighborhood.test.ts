@@ -22,6 +22,14 @@ describe('modalidade em frases declarativas da descrição', () => {
     expect(mode('Modelo de trabalho: remoto.')).toBe('remoto');
   });
 
+  it('lê a modalidade declarada em inglês', () => {
+    expect(mode('30 hours / week. Location: Hybrid role based in São Paulo, Brazil.')).toBe(
+      'hibrido',
+    );
+    expect(mode('This is a remote internship.')).toBe('remoto');
+    expect(mode('Our hybrid work culture is great for everyone.')).toBeNull();
+  });
+
   it('menção solta, condicional ou negada não define a modalidade', () => {
     expect(mode('Temos vagas presenciais ou remotas em diversas cidades.')).toBeNull();
     expect(mode('Não é um modelo presencial.')).toBeNull();
