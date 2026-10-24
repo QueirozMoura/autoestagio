@@ -145,6 +145,8 @@ describe('migração 0008: aplicação e compatibilidade', () => {
       '0008_cv_artifacts.sql',
       '0009_email_test_evidence.sql',
       '0010_job_leads.sql',
+      '0011_autonomous_runs.sql',
+      '0012_autonomous_grants.sql',
     ]);
     expect(snapshot()).toEqual(before);
     expect(old.pragma('foreign_key_check')).toEqual([]);

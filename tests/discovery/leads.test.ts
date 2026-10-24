@@ -53,7 +53,11 @@ describe('migração 0010 (job_leads)', () => {
     runMigrations(old, dir);
     seedJob(old, { title: 'Estágio Existente' });
     const before = old.prepare('SELECT * FROM jobs').all();
-    expect(runMigrations(old)).toEqual(['0010_job_leads.sql']);
+    expect(runMigrations(old)).toEqual([
+      '0010_job_leads.sql',
+      '0011_autonomous_runs.sql',
+      '0012_autonomous_grants.sql',
+    ]);
     expect(runMigrations(old)).toEqual([]);
     expect(old.prepare('SELECT * FROM jobs').all()).toEqual(before);
     expect(old.pragma('foreign_key_check')).toEqual([]);

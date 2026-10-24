@@ -1,0 +1,437 @@
+import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { dirname, join } from 'node:path';
+import type { Command } from 'commander';
+import { loadConfig, loadProfile, verifyApprovedCv, type Profile } from '../config/index.js';
+import type { Db } from '../db/index.js';
+import {
+  GrantError,
+  RunRefused,
+  createGrant,
+  diagnose,
+  latestGrant,
+  listGrants,
+  listRuns,
+  loadPolicy,
+  previewGrant,
+  realAuthorization,
+  revokeGrant,
+  runAutonomous,
+  runDecisions,
+  sourceMetrics,
+  type DecisionLine,
+  type DiscoverySummary,
+  type RunReport,
+} from '../autonomy/index.js';
+import { runRealScan } from '../discovery/real-scan.js';
+import { buildContext } from './email-commands.js';
+import { loadSourcesConfig } from '../sources/index.js';
+import { PROJECT_ROOT, resolveFromRoot } from '../utils/paths.js';
+
+interface Deps {
+  withDb: <T>(fn: (db: Db) => T) => T;
+  withDbAsync: <T>(fn: (db: Db) => Promise<T>) => Promise<T>;
+}
+
+export const STOP_FILE = resolveFromRoot('data/autonomo.STOP');
+
+const LABELS: Record<string, string> = {
+  candidatar: 'CANDIDATARIA (simulação)',
+  pendente: 'pendente',
+  pendente_canal: 'pendente de canal (candidatura manual)',
+  descartada: 'descartada',
+  ja_candidatada: 'já candidatada',
+  limite_atingido: 'limite atingido',
+  enviada: 'ENVIADA',
+  envio_incerto: 'ENVIO INCERTO (confira; nunca é reenviada)',
+};
+
+const line = (d: DecisionLine): string =>
+  `  vaga ${d.jobId} [${LABELS[d.decision] ?? d.decision}] ${d.company ?? '?'} — ${d.title}\n` +
+  `      ${d.reasons.join(' | ')}` +
+  (d.connector === undefined ? '' : `\n      canal: ${d.connector}`) +
+  (d.cvVariant === undefined ? '' : `; currículo: variante "${d.cvVariant}"`) +
+  (d.evidence === undefined ? '' : `\n      evidência: ${d.evidence}`);
+
+export function formatRunReport(report: RunReport): string {
+  const out: string[] = [
+    `Execução autônoma #${report.runId} (${report.mode === 'real' ? 'REAL' : 'simulação: nada é enviado'}) — ${report.status}`,
+  ];
+  if (report.discovery !== null)
+    out.push(
+      `Coleta: ${report.discovery.newJobs} vaga(s) nova(s), ${report.discovery.updatedJobs} atualizada(s).`,
+    );
+  out.push(
+    `Novas nesta execução: ${report.fresh.total} vaga(s) — em TI: ${report.fresh.inIt}; aptas: ${report.fresh.apto}; pendentes: ${report.fresh.pendente}; descartadas: ${report.fresh.descartada}; com canal automatizável (e-mail): ${report.fresh.automatable}.`,
+    `Análise: ${report.analyzed} vaga(s) — ${Object.entries(report.verdicts)
+      .map(([k, v]) => `${k}: ${v}`)
+      .join(', ')}; já com candidatura: ${report.alreadyApplied}.`,
+    `Limites: ${report.limits.perRun} por execução, ${report.limits.perDay} por dia (hoje: ${report.limits.sentToday} enviada(s)); efetivo agora: ${report.limits.effective}.`,
+    `Decisões: ${
+      Object.entries(report.counts)
+        .map(([k, v]) => `${LABELS[k] ?? k}: ${v}`)
+        .join('; ') || 'nenhuma'
+    }.`,
+  );
+  const show = (kind: string, title: string): void => {
+    const rows = report.decisions.filter((d) => d.decision === kind);
+    if (rows.length > 0) out.push('', `${title}:`, ...rows.map(line));
+  };
+  show('enviada', 'ENVIADAS (com evidência)');
+  show('envio_incerto', 'ENVIO INCERTO (exigem sua conferência)');
+  show('candidatar', 'Candidataria (dentro da política, com canal)');
+  show('pendente_canal', 'Dentro da política, sem canal automático (candidatura manual)');
+  show('pendente', 'Pendentes (precisam de informação ou de um portão resolvido)');
+  show('limite_atingido', 'Acima do limite');
+  if (report.discards.length > 0)
+    out.push(
+      '',
+      'Motivos de descarte:',
+      ...report.discards.map((d) => `  ${String(d.count).padStart(3)}× ${d.reason}`),
+    );
+  for (const note of report.notes) out.push('', note);
+  if (report.errors.length > 0) out.push('', `Erros: ${report.errors.join('; ')}`);
+  return out.join('\n');
+}
+
+/** Unidades de systemd (user) que rodam o pipeline sem nenhuma conversa aberta. Só SIMULAÇÃO por padrão. */
+export function systemdUnits(options: { node: string; root: string; real?: boolean }): {
+  service: string;
+  timer: string;
+} {
+  const command = `autonomo run --trigger timer${options.real === true ? ' --real' : ''}`;
+  return {
+    service: `[Unit]
+Description=AutoEstagio: execucao autonoma (${options.real === true ? 'REAL' : 'simulacao'})
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=${options.root}
+ExecStart=${options.node} --import tsx src/cli/index.ts ${command}
+Nice=10
+TimeoutStartSec=3h
+`,
+    timer: `[Unit]
+Description=AutoEstagio: agenda da execucao autonoma
+
+[Timer]
+OnCalendar=*-*-* 02:30:00
+OnCalendar=*-*-* 09:30:00
+OnCalendar=*-*-* 15:30:00
+RandomizedDelaySec=20min
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+`,
+  };
+}
+
+const unitDir = (): string => join(homedir(), '.config', 'systemd', 'user');
+
+/** Perfil com a aprovação só se o currículo no disco for exatamente o aprovado (como o comando "analyze"). */
+function profileForRun(path: string): { profile: Profile; cvOk: boolean } {
+  const loaded = loadProfile(path);
+  if (loaded === undefined) throw new Error('Perfil não encontrado.');
+  if (loaded.approval === undefined) return { profile: loaded, cvOk: false };
+  const check = verifyApprovedCv(loaded);
+  return check.ok
+    ? { profile: loaded, cvOk: true }
+    : { profile: { ...loaded, approval: undefined }, cvOk: false };
+}
+
+/** Modo autônomo: opt-in, simulação por padrão, com trava de parada, limites e histórico no SQLite. */
+export function registerAutonomoCommands(program: Command, { withDb, withDbAsync }: Deps): void {
+  const cmd = program
+    .command('autonomo')
+    .description(
+      'Modo autônomo: descoberta, análise, política e candidaturas (envio real só com concessão vigente)',
+    );
+
+  cmd
+    .command('run')
+    .description(
+      'Executa o pipeline. Padrão: simulação (nada é enviado e nenhuma candidatura é criada)',
+    )
+    .option('--real', 'envio real: exige política ligada, real.authorized e uma concessão vigente')
+    .option('--no-scan', 'não coleta vagas; usa as já gravadas')
+    .option('--trigger <origem>', 'manual ou timer', 'manual')
+    .option('--json', 'saída em JSON')
+    .action(async (options: { real?: boolean; scan: boolean; trigger: string; json?: boolean }) => {
+      if (options.trigger !== 'manual' && options.trigger !== 'timer')
+        throw new Error('--trigger aceita "manual" ou "timer".');
+      const config = loadConfig();
+      const { profile, cvOk } = profileForRun(config.profilePath);
+      const policy = loadPolicy();
+      const discover = options.scan
+        ? async (): Promise<DiscoverySummary> => {
+            const report = await withDbAsync((db) =>
+              runRealScan({ db, config: loadSourcesConfig() }),
+            );
+            return {
+              newJobs: report.totals.new,
+              updatedJobs: report.totals.updated,
+              errors: report.sources.flatMap((source) =>
+                source.error === null
+                  ? []
+                  : [`fonte ${source.source}: ${source.errorCategory ?? 'erro'}`],
+              ),
+            };
+          }
+        : undefined;
+      try {
+        const report = await withDbAsync((db) => {
+          if (options.real === true && !cvOk)
+            throw new RunRefused(
+              'Envio real recusado: currículo aprovado ausente ou alterado no disco.',
+            );
+          const cv = profile.approval === undefined ? undefined : verifyApprovedCv(profile);
+          return runAutonomous({
+            db,
+            profile,
+            policy,
+            mode: options.real === true ? 'real' : 'simulacao',
+            trigger: options.trigger as 'manual' | 'timer',
+            ...(discover === undefined ? {} : { discover }),
+            ...(options.real === true && cv?.ok === true
+              ? { emailContext: buildContext(db, config, profile), cv: cv.cv }
+              : {}),
+            stopFile: STOP_FILE,
+            envMaxPerDay: config.maxApplicationsPerDay,
+          });
+        });
+        console.log(
+          options.json === true ? JSON.stringify(report, null, 2) : formatRunReport(report),
+        );
+        if (report.status === 'falhou') process.exitCode = 1;
+      } catch (error) {
+        if (error instanceof RunRefused) {
+          console.error(error.message);
+          process.exitCode = 2;
+          return;
+        }
+        throw error;
+      }
+    });
+
+  cmd
+    .command('diagnose')
+    .description(
+      'Explica por que as vagas não são aptas: dados ausentes x incompatibilidade real (somente leitura)',
+    )
+    .option('--json', 'saída em JSON')
+    .action((options: { json?: boolean }) => {
+      const { profile } = profileForRun(loadConfig().profilePath);
+      const result = withDb((db) => diagnose(db, profile));
+      if (options.json === true) {
+        console.log(JSON.stringify(result, null, 2));
+        return;
+      }
+      const out = [
+        `Vagas analisadas: ${result.total} — aptas: ${result.byClass.apta}; só com DADOS AUSENTES: ${result.byClass.dados_ausentes}; INCOMPATÍVEIS de fato: ${result.byClass.incompativel}.`,
+        '',
+        'Critérios obrigatórios que bloqueiam (vagas por critério):',
+        ...Object.entries(result.byCriterion)
+          .sort(
+            (a, b) => b[1].nao_atende + b[1].indeterminado - (a[1].nao_atende + a[1].indeterminado),
+          )
+          .map(
+            ([id, c]) => `  ${id}: reprovado em ${c.nao_atende}, sem dados em ${c.indeterminado}`,
+          ),
+        '',
+        'Vagas só com dados ausentes, pelo conjunto do que falta:',
+        ...result.missingSets.map((m) => `  ${m.jobs}× falta: ${m.missing.join(' + ')}`),
+        '',
+        ...result.whatIf.map(
+          (w) =>
+            `Se "${w.tolerate.join(', ')}" desconhecido(a) fosse tolerado(a) (rules.tolerateUnknown), ${w.wouldBeApto} vaga(s) seriam aptas. Nada é relaxado sem a sua decisão.`,
+        ),
+      ];
+      console.log(out.join('\n'));
+    });
+
+  cmd
+    .command('sources')
+    .description(
+      'Métricas por fonte: vagas novas e relevantes que cada uma entrega (somente leitura)',
+    )
+    .option('--days <n>', 'janela em dias', '7')
+    .option('--json', 'saída em JSON')
+    .action((options: { days: string; json?: boolean }) => {
+      const { profile } = profileForRun(loadConfig().profilePath);
+      const days = Math.max(1, Number(options.days) || 7);
+      const rows = withDb((db) => sourceMetrics(db, profile, days));
+      if (options.json === true) {
+        console.log(JSON.stringify(rows, null, 2));
+        return;
+      }
+      console.log(
+        [
+          `Fontes (janela de ${days} dia(s)); "relevantes" = estágio em TI não inapto; "autom." = tem e-mail de candidatura utilizável:`,
+          'fonte                           vagas  novas  emTI  relev  apto  pend  inapto  autom.  coletas(erros)',
+          ...rows.map(
+            (m) =>
+              `${m.source.padEnd(30)} ${String(m.jobs).padStart(6)} ${String(m.newInWindow).padStart(6)} ${String(m.inIt).padStart(5)} ${String(m.relevant).padStart(6)} ${String(m.apto).padStart(5)} ${String(m.pendente).padStart(5)} ${String(m.inapto).padStart(7)} ${String(m.automatable).padStart(7)}  ${m.runsInWindow}(${m.errorsInWindow})`,
+          ),
+        ].join('\n'),
+      );
+    });
+
+  cmd
+    .command('grant')
+    .description(
+      'Autorização permanente (concessão) do envio real: sem --confirm só mostra o resumo e o código',
+    )
+    .option('--days <n>', 'validade em dias (1 a 90)', '30')
+    .option('--confirm <código>', 'código exibido no resumo')
+    .option('--reason <texto>', 'motivo da autorização')
+    .action((options: { days: string; confirm?: string; reason?: string }) => {
+      const policy = loadPolicy();
+      const days = Number(options.days);
+      try {
+        const preview = previewGrant(policy, days, new Date());
+        if (options.confirm === undefined) {
+          console.log(
+            [
+              'Concessão (nada foi gravado):',
+              ...preview.summary.map((l) => `  ${l}`),
+              '',
+              `Para autorizar: autonomo grant --days ${days} --reason "<motivo>" --confirm ${preview.code}`,
+              'O envio real continua exigindo política ligada (enabled, real.authorized) e EMAIL_SEND_ENABLED=true.',
+            ].join('\n'),
+          );
+          return;
+        }
+        const id = withDb((db) =>
+          createGrant(db, policy, {
+            days,
+            confirm: options.confirm ?? '',
+            reason: options.reason ?? '',
+          }),
+        );
+        console.log(`Concessão #${id} registrada, válida até ${preview.validUntil.slice(0, 10)}.`);
+      } catch (error) {
+        if (error instanceof GrantError) throw new Error(error.message, { cause: error });
+        throw error;
+      }
+    });
+
+  cmd
+    .command('revoke <id>')
+    .description('Revoga uma concessão (efeito imediato)')
+    .requiredOption('--reason <texto>', 'motivo')
+    .action((id: string, options: { reason: string }) => {
+      try {
+        withDb((db) => {
+          revokeGrant(db, Number(id), options.reason);
+        });
+      } catch (error) {
+        if (error instanceof GrantError) throw new Error(error.message, { cause: error });
+        throw error;
+      }
+      console.log(`Concessão #${id} revogada.`);
+    });
+
+  cmd
+    .command('status')
+    .description('Mostra a política vigente, a concessão, a trava de parada e as últimas execuções')
+    .action(() => {
+      const policy = loadPolicy();
+      const { grant, runs, grants } = withDb((db) => ({
+        grant: latestGrant(db),
+        runs: listRuns(db, 5),
+        grants: listGrants(db).length,
+      }));
+      const auth = realAuthorization(policy, grant, new Date());
+      console.log(
+        [
+          `Modo autônomo: ${policy.enabled ? 'LIGADO' : 'desligado'}; envio real: ${auth.ok ? `AUTORIZADO pela concessão #${auth.grant.id} até ${auth.grant.validUntil.slice(0, 10)}` : `NÃO autorizado (${auth.reason})`}. Concessões registradas: ${grants}.`,
+          `Pretensão salarial padrão: ${policy.salaryExpectation.currency} ${policy.salaryExpectation.amount}; bolsa mínima (quando divulgada): ${policy.rules.minStipend}.`,
+          `Limites: ${policy.limits.maxPerRun} por execução, ${policy.limits.maxPerDay} por dia, pausa de ${policy.limits.cooldownSeconds}s entre envios (o canal de e-mail impõe no mínimo 15 min).`,
+          `Parada: ${existsSync(STOP_FILE) ? 'ATIVA (use "autonomo resume")' : 'não solicitada'}.`,
+        ].join('\n'),
+      );
+      console.log(
+        runs.length === 0
+          ? 'Nenhuma execução registrada.'
+          : runs
+              .map((r) => `  #${r.id} ${r.started_at} ${r.mode} (${r.trigger}) — ${r.status}`)
+              .join('\n'),
+      );
+    });
+
+  cmd
+    .command('history')
+    .description(
+      'Histórico de execuções e decisões (use --run para ver as decisões de uma execução)',
+    )
+    .option('--run <id>', 'decisões de uma execução')
+    .option('--limit <n>', 'quantas execuções listar', '10')
+    .option('--json', 'saída em JSON')
+    .action((options: { run?: string; limit: string; json?: boolean }) => {
+      const result = withDb((db) =>
+        options.run === undefined
+          ? { runs: listRuns(db, Math.max(1, Number(options.limit) || 10)) }
+          : { decisions: runDecisions(db, Number(options.run)) },
+      );
+      if (options.json === true) {
+        console.log(JSON.stringify(result, null, 2));
+        return;
+      }
+      if ('runs' in result)
+        console.log(
+          result.runs.length === 0
+            ? 'Nenhuma execução registrada.'
+            : result.runs
+                .map((r) => `#${r.id} ${r.started_at} ${r.mode} (${r.trigger}) — ${r.status}`)
+                .join('\n'),
+        );
+      else
+        console.log(
+          result.decisions.length === 0 ? 'Sem decisões.' : result.decisions.map(line).join('\n'),
+        );
+    });
+
+  cmd
+    .command('stop')
+    .description('Pede parada: nenhuma execução nova começa e a atual termina com segurança')
+    .action(() => {
+      mkdirSync(dirname(STOP_FILE), { recursive: true });
+      writeFileSync(STOP_FILE, `${new Date().toISOString()}\n`);
+      console.log('Parada solicitada. Use "autonomo resume" para liberar.');
+    });
+
+  cmd
+    .command('resume')
+    .description('Remove a trava de parada')
+    .action(() => {
+      rmSync(STOP_FILE, { force: true });
+      console.log('Trava de parada removida.');
+    });
+
+  cmd
+    .command('timer')
+    .description(
+      'Imprime (ou grava com --write) as unidades de systemd (user) da SIMULAÇÃO; não habilita nada',
+    )
+    .option(
+      '--write [diretório]',
+      'grava os dois arquivos (padrão: ~/.config/systemd/user); não executa systemctl',
+    )
+    .action((options: { write?: string | boolean }) => {
+      const units = systemdUnits({ node: process.execPath, root: PROJECT_ROOT });
+      if (options.write === undefined) {
+        console.log(
+          `# autoestagio-autonomo.service\n${units.service}\n# autoestagio-autonomo.timer\n${units.timer}\n# Habilitar (sua decisão): systemctl --user daemon-reload && systemctl --user enable --now autoestagio-autonomo.timer\n# Rodar sem sessão aberta: loginctl enable-linger $USER\n# Parar: systemctl --user disable --now autoestagio-autonomo.timer   ou   autonomo stop`,
+        );
+        return;
+      }
+      const dir = typeof options.write === 'string' ? options.write : unitDir();
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(join(dir, 'autoestagio-autonomo.service'), units.service);
+      writeFileSync(join(dir, 'autoestagio-autonomo.timer'), units.timer);
+      console.log(`Unidades gravadas em ${dir}. Nada foi habilitado nem iniciado.`);
+    });
+}

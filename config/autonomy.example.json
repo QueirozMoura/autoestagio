@@ -1,0 +1,27 @@
+{
+  "enabled": false,
+  "salaryExpectation": {
+    "amount": 1800,
+    "currency": "BRL"
+  },
+  "limits": {
+    "maxPerRun": 5,
+    "maxPerDay": 10,
+    "cooldownSeconds": 120,
+    "lockTtlMinutes": 120
+  },
+  "rules": {
+    "sourcesAllow": [],
+    "companiesAllow": [],
+    "companiesDeny": [],
+    "areas": [],
+    "workModes": ["remoto", "hibrido", "presencial"],
+    "minStipend": 1200,
+    "verdicts": ["apto"],
+    "tolerateUnknown": []
+  },
+  "real": {
+    "authorized": false,
+    "connectors": []
+  }
+}

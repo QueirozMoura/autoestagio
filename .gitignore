@@ -11,6 +11,7 @@ config/profile.json
 config/sources.json
 config/cv-master.json
 config/cv-master.json.bak
+config/autonomy.json
 
 # spikes: dependências e saídas geradas (reproduzíveis)
 spikes/*/node_modules/

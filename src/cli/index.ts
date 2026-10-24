@@ -46,6 +46,7 @@ import {
 import { loadSourcesConfig } from '../sources/index.js';
 import { formatAnalysis } from './analyze.js';
 import { registerApplyCommands } from './apply-commands.js';
+import { registerAutonomoCommands } from './autonomo.js';
 import { registerLeadCommands } from './leads.js';
 import { registerLocationCommands } from './locais.js';
 import { registerCvCommands } from './cv-commands.js';
@@ -499,6 +500,7 @@ registerCvCommands(program);
 registerApplyCommands(program, { withDbAsync, parseId });
 registerLocationCommands(program, { withDb });
 registerLeadCommands(program, { withDb, parseId });
+registerAutonomoCommands(program, { withDb, withDbAsync });
 
 try {
   await program.parseAsync();
