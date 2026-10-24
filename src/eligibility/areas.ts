@@ -116,7 +116,7 @@ const TITLE_PATTERNS: Record<JobArea, RegExp> = {
 
 /** Sinais FRACOS no título: sugerem TI, mas sozinhos não bastam (precisam da descrição). */
 const WEAK_TITLE =
-  /\b(tecnologia|technology|tech|digital|sistemas?|suporte|automacao|implantacao|solucoes? digitais|inovacao|transformacao digital)\b/;
+  /\b(tecnologia|technology|tech|digital|sistemas?|suporte|automacao|automation|implantacao|solucoes? digitais|inovacao|transformacao digital)\b/;
 
 /**
  * Áreas de TI ou de negócio SEM sinal forte de TI no título. Um título só é "fora de TI" se não houver nenhum

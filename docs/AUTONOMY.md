@@ -6,6 +6,7 @@ O envio real exige política ligada, `real.authorized`, uma **concessão** vigen
 
 ```bash
 npm run dev -- autonomo run [--no-scan] [--real]   # simulação (padrão); --real só com concessão
+npm run dev -- autonomo sources [--days 7]        # métricas por fonte: novas, em TI, relevantes, automatizáveis
 npm run dev -- autonomo diagnose                   # por que as vagas não são aptas (dados ausentes x incompatível)
 npm run dev -- autonomo grant [--days 30]          # resumo + código; com --confirm <código> --reason "..." grava
 npm run dev -- autonomo revoke <id> --reason "..." # revoga a concessão (efeito imediato)

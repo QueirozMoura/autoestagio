@@ -1,4 +1,5 @@
 import type { Profile } from '../config/index.js';
+import { neighborhoodText } from '../discovery/neighborhood.js';
 import {
   AREA_LABELS,
   canonicalProfileAreas,
@@ -265,8 +266,16 @@ function residenceRestriction(job: EligibilityJob, city: string): string | undef
   return place.slice(0, 40);
 }
 
+/** Local como na vaga, com o bairro/rua que a descrição informa explicitamente (quando informa). */
+export function placeLabel(job: EligibilityJob): string {
+  const detail = neighborhoodText(job.description);
+  return `${job.location ?? ''}${detail === '' ? '' : ` — ${detail}`}`;
+}
+
 export function commuteMatches(job: EligibilityJob, profile: Profile) {
-  const haystack = norm(`${job.company ?? ''} ${job.location ?? ''}`);
+  const haystack = norm(
+    `${job.company ?? ''} ${job.location ?? ''} ${neighborhoodText(job.description)}`,
+  );
   return (profile.commute ?? []).filter((entry) =>
     entry.keywords.some((keyword) =>
       new RegExp(`\\b${norm(keyword).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`).test(haystack),
@@ -284,7 +293,7 @@ function commuteCriterion(job: EligibilityJob, profile: Profile): Criterion {
     return {
       ...base,
       outcome: 'indeterminado',
-      detail: `Deslocamento não verificável${origin}: "${job.location ?? ''}" não consta nos tempos confirmados no perfil (adequado até ${limit} min por trecho; confirme com "locais registrar").`,
+      detail: `Deslocamento não verificável${origin}: "${placeLabel(job)}" não consta nos tempos confirmados no perfil (adequado até ${limit} min por trecho; confirme com "locais registrar").`,
     };
   }
   // Mais de um local casando: vale o pior caso.

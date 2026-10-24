@@ -110,3 +110,28 @@ das quais **1 é de TI**. Nenhum erro e nenhuma falha de gravação.
   Essas empresas provavelmente usam outras plataformas (Gupy, Workday, Cia de Talentos).
 - **Gupy:** `portal.gupy.io/robots.txt` não restringe rastreadores e `portal.api.gupy.io` não publica `robots.txt`, mas a API do portal não é documentada
   para uso público e os termos de uso não foram verificados. **Não foi implementado adaptador.** Alternativa segura: registrar vagas da Gupy como leads manualmente.
+
+## Expansão da descoberta (2026-10-24)
+
+Sondagem de ≈ 200 slugs de empresas brasileiras nas APIs públicas já aprovadas (Greenhouse, Lever, Ashby), com
+1 requisição por segundo, só GET. Resultado, medido com o filtro de estágio do projeto:
+
+| Alvo (Greenhouse)      | Estágios no Brasil | Observação                                                                    |
+| ---------------------- | -----------------: | ----------------------------------------------------------------------------- |
+| `btgpactual`           |                  8 | Maioria fora de TI; "Short Job – Automation" e programas gerais               |
+| `c6bank`               |                  6 | Programas gerais e áreas de negócio; o texto cita "100% presencial, Jardins"  |
+| `inter`                |                  4 | Parte em Belo Horizonte (fora da região); programa geral de banco de talentos |
+| `stone`, `quintoandar` |                  0 | Existem na plataforma, mas sem estágio no momento                             |
+
+Investigadas e **não adotadas**:
+
+- **Gupy** (maior volume de estágios): o endpoint do portal não é documentado e os termos de uso não foram
+  verificados; a candidatura exige login. Fica fora até haver revisão dos termos.
+- **Repositórios de vagas no GitHub** (`frontendbr/vagas` etc.): API pública e documentada, mas só 1 vaga marcada
+  como estágio entre os repositórios testados, e o rótulo é pouco confiável (a vaga marcada era Sênior).
+- **SmartRecruiters**, **Inhire**: sem estágio relevante nos slugs testados / candidatura por formulário com
+  reCAPTCHA (nada a automatizar).
+
+Lições: a maioria dos estágios encontrados é de programas gerais de bancos, **sem área, bolsa ou modalidade na
+vaga**. O extrator agora lê frases declarativas da descrição ("modelo 100% presencial", "estagiar presencialmente") e
+o bairro/rua escritos ("na região dos Jardins"), sem deduzir nada. Use `autonomo sources` para medir cada fonte.

@@ -10,7 +10,7 @@ import {
 import type { Profile } from '../config/index.js';
 import { profileSchema } from '../config/profile.js';
 import type { Db } from '../db/index.js';
-import { GREATER_SP, OTHER_CITIES, commuteMatches } from './evaluate.js';
+import { GREATER_SP, OTHER_CITIES, commuteMatches, placeLabel } from './evaluate.js';
 import { norm } from './areas.js';
 
 /**
@@ -26,9 +26,9 @@ export interface PendingLocation {
 export function pendingLocations(db: Db, profile: Profile): PendingLocation[] {
   const rows = db
     .prepare(
-      "SELECT company, location FROM jobs WHERE work_mode IN ('hibrido', 'presencial') AND location IS NOT NULL AND trim(location) <> ''",
+      "SELECT company, location, description FROM jobs WHERE work_mode IN ('hibrido', 'presencial') AND location IS NOT NULL AND trim(location) <> ''",
     )
-    .all() as { company: string | null; location: string }[];
+    .all() as { company: string | null; location: string; description: string | null }[];
   const city = norm(profile.city).split(',')[0]?.trim() ?? '';
   const byLocation = new Map<string, PendingLocation>();
   for (const row of rows) {
@@ -40,6 +40,7 @@ export function pendingLocations(db: Db, profile: Profile): PendingLocation[] {
           title: '',
           company: row.company,
           location: row.location,
+          description: row.description,
           workMode: 'presencial',
           stipendMin: null,
           stipendMax: null,
@@ -55,9 +56,18 @@ export function pendingLocations(db: Db, profile: Profile): PendingLocation[] {
         : GREATER_SP.test(location)
           ? 'metropolitana'
           : 'indefinida';
-    const current = byLocation.get(row.location.trim());
-    if (current === undefined)
-      byLocation.set(row.location.trim(), { location: row.location.trim(), jobs: 1, region });
+    const label = placeLabel({
+      title: '',
+      company: row.company,
+      location: row.location,
+      description: row.description,
+      workMode: 'presencial',
+      stipendMin: null,
+      stipendMax: null,
+      stipendCurrency: null,
+    }).trim();
+    const current = byLocation.get(label);
+    if (current === undefined) byLocation.set(label, { location: label, jobs: 1, region });
     else current.jobs++;
   }
   return [...byLocation.values()].sort(
