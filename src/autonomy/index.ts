@@ -19,6 +19,17 @@ export {
   type SourceMetric,
 } from './metrics.js';
 export {
+  QUEUE_STATUSES,
+  QueueError,
+  buildQueue,
+  cleanUrl,
+  listQueue,
+  setQueueStatus,
+  type QueueBuildResult,
+  type QueueItem,
+  type QueueStatus,
+} from './queue.js';
+export {
   diagnose,
   extractionCauses,
   type Diagnosis,

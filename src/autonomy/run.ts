@@ -7,6 +7,7 @@ import { listCandidates } from '../preparation/index.js';
 import { attemptEmail, discoverRecipient } from './email-connector.js';
 import { decideJob, type DecisionKind } from './decide.js';
 import { latestGrant } from './grant.js';
+import { buildQueue, type QueueBuildResult } from './queue.js';
 import {
   classifyOpportunities,
   loadFacts,
@@ -83,6 +84,8 @@ export interface RunReport {
   fresh: FreshSummary;
   /** As quatro categorias sobre TODAS as vagas ainda sem candidatura (não só as novas). */
   opportunities: OpportunitySummary;
+  /** Fila de candidaturas (plano) após esta execução. */
+  queue: QueueBuildResult;
   grantId: number | null;
   errors: string[];
   stopped: boolean;
@@ -161,6 +164,7 @@ export async function runAutonomous(options: RunOptions): Promise<RunReport> {
     discards: [],
     fresh: { total: 0, inIt: 0, apto: 0, pendente: 0, descartada: 0, automatable: 0 },
     opportunities: summarizeOpportunities([]),
+    queue: { created: 0, updated: 0, cancelled: 0, ready: { automatico: 0, assistido: 0 } },
     grantId: grant?.id ?? null,
     errors: [],
     stopped: false,
@@ -353,6 +357,7 @@ export async function runAutonomous(options: RunOptions): Promise<RunReport> {
       .map(([reason, count]) => ({ reason, count }))
       .sort((x, y) => y.count - x.count);
     report.opportunities = summarizeOpportunities(classifyOpportunities(db, profile, policy));
+    report.queue = buildQueue(db, profile, policy, clock());
     report.status = report.stopped ? 'interrompida' : 'concluida';
   } catch (error) {
     report.status = 'falhou';
@@ -372,6 +377,7 @@ export async function runAutonomous(options: RunOptions): Promise<RunReport> {
       grantId: report.grantId,
       fresh: report.fresh,
       opportunities: report.opportunities,
+      queue: report.queue,
       discards: report.discards,
       errors: report.errors,
       stopped: report.stopped,

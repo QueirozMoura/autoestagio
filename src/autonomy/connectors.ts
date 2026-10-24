@@ -22,14 +22,28 @@ export interface Availability {
 
 export interface Connector {
   id: string;
+  /** automatico = o agente conclui sozinho; assistido = exige você (login, CAPTCHA, avaliação ou decisão). */
+  flow: 'automatico' | 'assistido';
+  /** Barreiras técnicas verificadas (ex.: "recaptcha-enterprise", "login"). */
+  barriers: readonly string[];
   availability(db: Db, job: ConnectorJob): Availability;
   /** Ausente = o conector ainda não envia. O orquestrador trata como "pendente de canal". */
   send?: undefined;
 }
 
+/**
+ * Plataformas de candidatura, verificadas separadamente em 2026-10-24 (páginas reais, somente leitura):
+ *  - Greenhouse: API pública só LISTA vagas; enviar por API exige chave da empresa; o formulário usa reCAPTCHA Enterprise.
+ *  - Lever: idem (chave da empresa); o formulário usa hCaptcha.
+ *  - Ashby: API pública só lista; o formulário usa reCAPTCHA Enterprise.
+ *  - Inhire: sem login; reCAPTCHA Enterprise invisível (passa em navegador real, sob a sua autorização por vaga).
+ *  - Gupy: exige conta de candidato (e-mail/CPF e senha, Google ou LinkedIn); termos de automação não verificados.
+ * Nada disso é contornado: o agente prepara tudo e a candidatura segue o fluxo ASSISTIDO, no seu navegador.
+ */
 interface PortalRule {
   id: string;
   host: RegExp;
+  barriers: readonly string[];
   reason: string;
 }
 
@@ -37,46 +51,59 @@ const PORTALS: readonly PortalRule[] = [
   {
     id: 'portal-inhire',
     host: /(^|\.)inhire\.app$/,
-    reason: 'formulário Inhire com reCAPTCHA Enterprise: não é automatizado (sem burlar anti-bot)',
+    barriers: ['recaptcha-enterprise'],
+    reason:
+      'Inhire: formulário sem login, com reCAPTCHA Enterprise invisível; envio no seu navegador, sob autorização',
   },
   {
     id: 'portal-gupy',
     host: /(^|\.)gupy\.io$/,
-    reason: 'Gupy exige conta e login do candidato: não é automatizado',
+    barriers: ['login'],
+    reason:
+      'Gupy: exige a sua conta de candidato (login); candidatura no seu navegador, já autenticado por você',
   },
   {
     id: 'portal-greenhouse',
     host: /(^|\.)greenhouse\.io$/,
-    reason: 'a candidatura por API do Greenhouse exige chave da empresa; o formulário tem anti-bot',
+    barriers: ['recaptcha-enterprise', 'api-key-da-empresa'],
+    reason: 'Greenhouse: reCAPTCHA Enterprise no formulário; a API de envio exige chave da empresa',
   },
   {
     id: 'portal-lever',
     host: /(^|\.)lever\.co$/,
-    reason: 'a candidatura por API do Lever exige chave da empresa; o formulário tem anti-bot',
+    barriers: ['hcaptcha', 'api-key-da-empresa'],
+    reason: 'Lever: hCaptcha no formulário; a API de envio exige chave da empresa',
   },
   {
     id: 'portal-ashby',
     host: /(^|\.)ashbyhq\.com$/,
-    reason: 'o formulário do Ashby tem verificação anti-bot: não é automatizado',
+    barriers: ['recaptcha-enterprise'],
+    reason: 'Ashby: reCAPTCHA Enterprise no formulário',
   },
 ];
 
 const portal = (rule: PortalRule): Connector => ({
   id: rule.id,
+  flow: 'assistido',
+  barriers: rule.barriers,
   availability: () => ({ available: false, reason: rule.reason }),
 });
 
 const unknownPortal: Connector = {
   id: 'portal-desconhecido',
+  flow: 'assistido',
+  barriers: [],
   availability: () => ({
     available: false,
-    reason: 'portal sem conector: candidatura manual',
+    reason: 'portal sem conector: candidatura assistida (barreiras não verificadas)',
   }),
 };
 
 /** Canal de e-mail: só existe se a vaga tem destinatário verificado (nunca deduzido). */
 const email: Connector = {
   id: 'email',
+  flow: 'automatico',
+  barriers: [],
   availability(db, job) {
     const row = db
       .prepare(

@@ -6,24 +6,30 @@ import { loadConfig, loadProfile, verifyApprovedCv, type Profile } from '../conf
 import type { Db } from '../db/index.js';
 import {
   GrantError,
+  QUEUE_STATUSES,
+  QueueError,
   RunRefused,
+  buildQueue,
   createGrant,
   classifyOpportunities,
   diagnose,
   extractionCauses,
   latestGrant,
   listGrants,
+  listQueue,
   listRuns,
   loadPolicy,
   previewGrant,
   realAuthorization,
   revokeGrant,
+  setQueueStatus,
   runAutonomous,
   runDecisions,
   sourceMetrics,
   summarizeOpportunities,
   type Bucket,
   type DecisionLine,
+  type QueueStatus,
   type DiscoverySummary,
   type RunReport,
 } from '../autonomy/index.js';
@@ -51,10 +57,10 @@ const LABELS: Record<string, string> = {
 };
 
 const BUCKET_LABELS: Record<Bucket, string> = {
-  automatizavel: 'elegível com candidatura AUTOMATIZÁVEL',
-  manual: 'elegível, candidatura MANUAL',
-  insuficiente: 'informações INSUFICIENTES',
-  incompativel: 'INCOMPATÍVEL com o perfil',
+  automatizavel: 'PRONTA para candidatura AUTOMÁTICA',
+  manual: 'PRONTA para candidatura ASSISTIDA',
+  insuficiente: 'PENDENTE de informações',
+  incompativel: 'DESCARTADA (incompatível)',
 };
 
 const bucketLine = (b: Record<Bucket, number>): string =>
@@ -78,6 +84,7 @@ export function formatRunReport(report: RunReport): string {
   out.push(
     `Novas nesta execução: ${report.fresh.total} vaga(s) — em TI: ${report.fresh.inIt}; aptas: ${report.fresh.apto}; pendentes: ${report.fresh.pendente}; descartadas: ${report.fresh.descartada}; com canal automatizável (e-mail): ${report.fresh.automatable}.`,
     `Categorias (todas as ${report.opportunities.total} vagas sem candidatura): ${bucketLine(report.opportunities.buckets)}.`,
+    `Fila: ${report.queue.created} nova(s), ${report.queue.updated} atualizada(s), ${report.queue.cancelled} cancelada(s); prontas agora: ${report.queue.ready.automatico} automática(s) e ${report.queue.ready.assistido} assistida(s).`,
     `Análise: ${report.analyzed} vaga(s) — ${Object.entries(report.verdicts)
       .map(([k, v]) => `${k}: ${v}`)
       .join(', ')}; já com candidatura: ${report.alreadyApplied}.`,
@@ -356,6 +363,103 @@ export function registerAutonomoCommands(program: Command, { withDb, withDbAsync
       }
       console.log(out.length === 0 ? 'Nenhuma vaga.' : out.join('\n'));
     });
+
+  const queue = cmd
+    .command('queue')
+    .description(
+      'Fila de candidaturas (plano): automáticas e assistidas, priorizadas e prontas para execução',
+    );
+
+  queue
+    .command('build')
+    .description('Atualiza a fila a partir da classificação atual (não envia nada)')
+    .action(() => {
+      const { profile } = profileForRun(loadConfig().profilePath);
+      const policy = loadPolicy();
+      const result = withDb((db) => buildQueue(db, profile, policy));
+      console.log(
+        `Fila: ${result.created} nova(s), ${result.updated} atualizada(s), ${result.cancelled} cancelada(s); prontas: ${result.ready.automatico} automática(s), ${result.ready.assistido} assistida(s).`,
+      );
+    });
+
+  queue
+    .command('list')
+    .description('Mostra a fila em ordem de prioridade')
+    .option('--fluxo <fluxo>', 'automatico ou assistido')
+    .option('--status <status>', QUEUE_STATUSES.join(', '))
+    .option('--json', 'saída em JSON')
+    .action((options: { fluxo?: string; status?: string; json?: boolean }) => {
+      if (
+        options.fluxo !== undefined &&
+        options.fluxo !== 'automatico' &&
+        options.fluxo !== 'assistido'
+      )
+        throw new Error('--fluxo aceita "automatico" ou "assistido".');
+      if (
+        options.status !== undefined &&
+        !(QUEUE_STATUSES as readonly string[]).includes(options.status)
+      )
+        throw new Error(`--status aceita: ${QUEUE_STATUSES.join(', ')}.`);
+      const items = withDb((db) =>
+        listQueue(db, {
+          ...(options.fluxo === undefined
+            ? {}
+            : { flow: options.fluxo as 'automatico' | 'assistido' }),
+          ...(options.status === undefined ? {} : { status: options.status as QueueStatus }),
+        }),
+      );
+      if (options.json === true) {
+        console.log(JSON.stringify(items, null, 2));
+        return;
+      }
+      console.log(
+        items.length === 0
+          ? 'Fila vazia.'
+          : items
+              .map(
+                (q) =>
+                  `#${q.id} [${q.flow}/${q.status}] prioridade ${q.priority} — vaga ${q.jobId}: ${q.company ?? '?'} — ${q.title}\n` +
+                  `      canal: ${q.connector ?? '?'}; currículo: variante "${q.cvVariant ?? '?'}"; pretensão: R$ ${q.salaryExpectation ?? '?'}\n` +
+                  `      link: ${q.applyUrl ?? '(sem link)'}` +
+                  (q.barriers.length > 0 ? `\n      atenção: ${q.barriers.join(' | ')}` : '') +
+                  (q.evidence === null ? '' : `\n      evidência: ${q.evidence}`),
+              )
+              .join('\n'),
+      );
+    });
+
+  queue
+    .command('set <id>')
+    .description(
+      'Atualiza o andamento de um item (concluir exige evidência; cancelar exige motivo)',
+    )
+    .requiredOption('--status <status>', QUEUE_STATUSES.join(', '))
+    .option('--evidencia <texto>', 'confirmação da plataforma ou e-mail recebido')
+    .option('--motivo <texto>', 'motivo (cancelamento)')
+    .option('--nota <texto>', 'observação')
+    .action(
+      (
+        id: string,
+        options: { status: string; evidencia?: string; motivo?: string; nota?: string },
+      ) => {
+        if (!(QUEUE_STATUSES as readonly string[]).includes(options.status))
+          throw new Error(`--status aceita: ${QUEUE_STATUSES.join(', ')}.`);
+        try {
+          withDb((db) => {
+            setQueueStatus(db, Number(id), {
+              status: options.status as QueueStatus,
+              ...(options.evidencia === undefined ? {} : { evidence: options.evidencia }),
+              ...(options.motivo === undefined ? {} : { reason: options.motivo }),
+              ...(options.nota === undefined ? {} : { notes: options.nota }),
+            });
+          });
+        } catch (error) {
+          if (error instanceof QueueError) throw new Error(error.message, { cause: error });
+          throw error;
+        }
+        console.log(`Item #${id} atualizado.`);
+      },
+    );
 
   cmd
     .command('grant')

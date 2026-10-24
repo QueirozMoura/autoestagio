@@ -52,9 +52,11 @@ export const policySchema = z
           .default(['apto']),
         /**
          * Critérios obrigatórios que, quando DESCONHECIDOS (nunca quando reprovados), não impedem a candidatura.
-         * Hoje só "bolsa": bolsa divulgada abaixo do mínimo continua descartando. Vazio por padrão.
+         * "bolsa" (divulgada abaixo do mínimo continua descartando) e "modalidade" (desconhecida NUNCA vira remoto
+         * nem híbrido; se um formulário pedir disponibilidade presencial, a resposta exige informação confirmada por você).
+         * Vazio por padrão.
          */
-        tolerateUnknown: z.array(z.enum(['bolsa'])).default([]),
+        tolerateUnknown: z.array(z.enum(['bolsa', 'modalidade'])).default([]),
       })
       .prefault({}),
     /**

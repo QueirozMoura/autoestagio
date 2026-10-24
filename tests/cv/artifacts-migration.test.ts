@@ -147,6 +147,7 @@ describe('migração 0008: aplicação e compatibilidade', () => {
       '0010_job_leads.sql',
       '0011_autonomous_runs.sql',
       '0012_autonomous_grants.sql',
+      '0013_autonomous_queue.sql',
     ]);
     expect(snapshot()).toEqual(before);
     expect(old.pragma('foreign_key_check')).toEqual([]);

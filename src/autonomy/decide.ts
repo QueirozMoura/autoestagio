@@ -20,6 +20,10 @@ export interface Decision {
   reasons: string[];
   connector?: string;
   cvVariant?: string;
+  /** automatico = o agente conclui; assistido = exige você. Só existe quando a vaga passou pela política. */
+  flow?: 'automatico' | 'assistido';
+  /** Barreiras do canal e avisos (ex.: modalidade desconhecida) para quem for executar a candidatura. */
+  warnings?: string[];
 }
 
 export interface JobFacts {
@@ -106,17 +110,27 @@ export function decideJob(db: Db, policy: Policy, job: JobFacts): Decision {
 
   const resolved = resolveConnector(db, job);
   const cvVariant = suggestVariant(job.title, job.description).variant;
+  const warnings = [...resolved.connector.barriers.map((b) => `barreira do canal: ${b}`)];
+  if (job.workMode === null)
+    warnings.push(
+      'modalidade desconhecida (não é presumida remota nem híbrida): se o formulário pedir disponibilidade presencial, confirme com você',
+    );
+  if (job.stipend === null) warnings.push('bolsa não divulgada (tolerada pela política)');
   if (!resolved.available)
     return {
       kind: 'pendente_canal',
       reasons: [resolved.reason],
       connector: resolved.connector.id,
       cvVariant,
+      flow: resolved.connector.flow,
+      warnings,
     };
   return {
     kind: 'candidatar',
     reasons: ['dentro da política e com canal disponível'],
     connector: resolved.connector.id,
     cvVariant,
+    flow: resolved.connector.flow,
+    warnings,
   };
 }

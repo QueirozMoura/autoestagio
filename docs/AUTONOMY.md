@@ -44,6 +44,33 @@ bloqueia e fica pendente: o modo autônomo não aplica liberações humanas. Cad
 
 Portais (`inhire`, `gupy`, `greenhouse`, `lever`, `ashby`) ficam **indisponíveis**: reCAPTCHA, login ou chave da empresa.
 
+## Agente híbrido: dois fluxos e a fila
+
+- **Automático:** o agente conclui sozinho, dentro da concessão, as vagas com canal compatível (hoje, e-mail de
+  candidatura utilizável).
+- **Assistido:** vagas em portais com login, CAPTCHA, avaliação ou decisão sua. O agente descobre, analisa, escolhe a
+  variante do currículo, reúne os dados (pretensão R$ 1.800) e deixa a vaga **pronta**; a execução assistida acontece
+  no **seu navegador**, sob a sua autorização, e para antes de qualquer etapa que dependa de você. Uma vaga assistida
+  nunca bloqueia as demais.
+- `autonomo queue build|list|set`: fila priorizada (ranking transparente; a área não pesa; automático antes de
+  assistido), idempotente, uma linha por vaga. **Concluir exige evidência** (confirmação da plataforma ou e-mail) e
+  é definitivo; cancelar exige motivo. `autonomo run` reconstrói a fila a cada execução.
+- `tolerateUnknown` aceita `bolsa` e `modalidade`. Modalidade desconhecida **nunca** vira remoto nem híbrido; a fila
+  traz o aviso e, se o formulário pedir disponibilidade presencial, a resposta exige informação confirmada por você.
+
+## Portais (verificados separadamente em 2026-10-24, páginas reais, somente leitura)
+
+| Plataforma | Listar vagas        | Candidatura                                             | Barreira no formulário         | Fluxo     |
+| ---------- | ------------------- | ------------------------------------------------------- | ------------------------------ | --------- |
+| Greenhouse | API pública         | API só com chave da empresa                             | reCAPTCHA Enterprise           | assistido |
+| Lever      | API pública         | API só com chave da empresa                             | hCaptcha                       | assistido |
+| Ashby      | API pública         | formulário                                              | reCAPTCHA Enterprise           | assistido |
+| Inhire     | página pública (JS) | formulário sem login                                    | reCAPTCHA Enterprise invisível | assistido |
+| Gupy       | páginas públicas    | exige conta de candidato (e-mail/CPF, Google, LinkedIn) | login                          | assistido |
+
+Nada é contornado e nenhuma avaliação é respondida por conta própria. Um conector de portal só vira automático se a
+plataforma oferecer um caminho oficial e permitido; hoje nenhum oferece.
+
 ## As quatro categorias
 
 `autonomo opportunities` (e o relatório) separam as vagas sem candidatura em: **elegível com candidatura

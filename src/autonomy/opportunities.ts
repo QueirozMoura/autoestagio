@@ -20,17 +20,24 @@ interface Row {
   source_slug: string;
   verdict: JobFacts['verdict'];
   criteria: string;
+  differentials_matched: number;
+  differentials_total: number;
+  first_seen_at: string;
 }
 
 export interface FactsWithSource extends JobFacts {
   source: string;
+  differentialsMatched: number;
+  differentialsTotal: number;
+  firstSeenAt: string;
 }
 
 export function loadFacts(db: Db, profile: Profile): Map<number, FactsWithSource> {
   const rows = db
     .prepare(
       `SELECT j.id, j.title, j.company, j.work_mode, j.stipend_amount, j.description, j.url,
-              j.apply_url, s.kind AS source_kind, s.slug AS source_slug, e.verdict, e.criteria
+              j.apply_url, s.kind AS source_kind, s.slug AS source_slug, e.verdict, e.criteria,
+              e.differentials_matched, e.differentials_total, j.first_seen_at
          FROM jobs j JOIN sources s ON s.id = j.source_id
          JOIN job_eligibility e ON e.job_id = j.id
         WHERE e.profile_hash = ?`,
@@ -52,6 +59,9 @@ export function loadFacts(db: Db, profile: Profile): Map<number, FactsWithSource
         source: `${row.source_kind}:${row.source_slug}`,
         verdict: row.verdict,
         criteria: JSON.parse(row.criteria) as Criterion[],
+        differentialsMatched: row.differentials_matched,
+        differentialsTotal: row.differentials_total,
+        firstSeenAt: row.first_seen_at,
       },
     ]),
   );
@@ -76,6 +86,11 @@ export interface Opportunity {
   connector: string | undefined;
   /** Link de candidatura (ou da vaga) para quem for candidatar manualmente. */
   url: string;
+  flow: 'automatico' | 'assistido' | undefined;
+  cvVariant: string | undefined;
+  /** Barreiras do canal e avisos para quem executa a candidatura. */
+  warnings: string[];
+  facts: FactsWithSource;
   /** Critérios obrigatórios ainda sem dado (para medir os bloqueios). */
   missing: string[];
 }
@@ -107,6 +122,10 @@ export function classifyOpportunities(db: Db, profile: Profile, policy: Policy):
       reasons: decision.reasons,
       connector: decision.connector,
       url: facts.applyUrl ?? facts.url,
+      flow: decision.flow,
+      cvVariant: decision.cvVariant,
+      warnings: decision.warnings ?? [],
+      facts,
       missing: facts.criteria
         .filter(
           (c) => c.kind === 'obrigatorio' && c.outcome === 'indeterminado' && !tolerated.has(c.id),
