@@ -58,6 +58,31 @@ Portais (`inhire`, `gupy`, `greenhouse`, `lever`, `ashby`) ficam **indisponívei
 - `tolerateUnknown` aceita `bolsa` e `modalidade`. Modalidade desconhecida **nunca** vira remoto nem híbrido; a fila
   traz o aviso e, se o formulário pedir disponibilidade presencial, a resposta exige informação confirmada por você.
 
+## Executor assistido (`autonomo exec`)
+
+Faz parte do AutoEstágio (Playwright com o Chrome/Chromium da máquina; não depende do Claude Code nem de conversa).
+Para cada vaga **pronta** do fluxo assistido, em ordem de prioridade: reserva o item, abre o link oficial (só HTTPS),
+classifica a página (vaga encerrada, login, desafio de CAPTCHA visível, avaliação, sem formulário), lê os campos,
+escolhe o currículo aprovado da variante (PDF de `data/cv-output`, com SHA-256; senão o genérico; senão o mestre do
+perfil), preenche **só dados comprovados** (`config/applicant.json`, perfil e a pretensão da política), anexa o
+currículo, confere cada valor na página, tira uma captura (`data/exec/`) e **para antes do envio**.
+
+- **Nunca envia:** a interface do navegador do executor não tem "clicar" nem "enviar".
+- **Nunca marca concluída sem evidência:** com `--revisar` a janela fica aberta para você enviar; depois o executor
+  procura a confirmação da plataforma e só então conclui, guardando o trecho como evidência.
+- **Nunca preenche:** autodeclaração (gênero, raça, deficiência, orientação...), aceite de termos/LGPD, disponibilidade
+  presencial, autorização de trabalho, texto livre, idiomas (mostra a dica do perfil) nem perguntas sem dado comprovado.
+- **Bloqueio de uma vaga não para as demais:** login, CAPTCHA visível, avaliação, campo obrigatório desconhecido ou erro
+  viram `pendente_humano` com o motivo e a execução segue; vaga encerrada é cancelada com motivo.
+- Cada execução fica em `autonomous_executions` (etapas, campos com e-mail/telefone mascarados, currículo e captura).
+
+```bash
+npm run dev -- autonomo exec --planejar --max 3   # só lê e mostra o que preencheria
+npm run dev -- autonomo exec --item 2             # prepara um item (preenche, anexa, captura, para)
+npm run dev -- autonomo exec --revisar            # com janela: você revisa e envia; a confirmação vira evidência
+npm run dev -- autonomo exec --com-janela         # janela aberta (entrar na Gupy uma vez; o login fica em data/browser-profile)
+```
+
 ## Portais (verificados separadamente em 2026-10-24, páginas reais, somente leitura)
 
 | Plataforma | Listar vagas        | Candidatura                                             | Barreira no formulário         | Fluxo     |

@@ -53,6 +53,7 @@ describe('migração 0009 (evidência de teste)', () => {
       '0011_autonomous_runs.sql',
       '0012_autonomous_grants.sql',
       '0013_autonomous_queue.sql',
+      '0014_autonomous_executions.sql',
     ]);
     expect(runMigrations(old)).toEqual([]);
     expect(old.prepare('SELECT * FROM applications').all()).toEqual(apps);

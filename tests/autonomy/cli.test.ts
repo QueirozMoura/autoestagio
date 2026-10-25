@@ -17,6 +17,7 @@ describe('CLI autonomo', () => {
     const cmd = program.commands.find((c) => c.name() === 'autonomo');
     expect(cmd?.commands.map((c) => c.name()).sort()).toEqual([
       'diagnose',
+      'exec',
       'grant',
       'history',
       'opportunities',

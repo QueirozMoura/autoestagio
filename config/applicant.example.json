@@ -1,0 +1,12 @@
+{
+  "fullName": "Pessoa Exemplo da Silva",
+  "email": "pessoa.exemplo@example.com",
+  "phone": "+5511999999999",
+  "city": "São Paulo",
+  "state": "SP",
+  "country": "Brasil",
+  "linkedin": "https://www.linkedin.com/in/exemplo/",
+  "github": "https://github.com/exemplo",
+  "portfolio": "https://exemplo.dev/",
+  "provenance": "dados fictícios de exemplo"
+}

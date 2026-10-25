@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import type { Command } from 'commander';
-import { loadConfig, loadProfile, verifyApprovedCv, type Profile } from '../config/index.js';
+import { loadConfig, verifyApprovedCv } from '../config/index.js';
 import type { Db } from '../db/index.js';
 import {
   GrantError,
@@ -35,6 +35,8 @@ import {
 } from '../autonomy/index.js';
 import { runRealScan } from '../discovery/real-scan.js';
 import { buildContext } from './email-commands.js';
+import { registerExecCommand } from './exec.js';
+import { profileForRun } from './run-profile.js';
 import { loadSourcesConfig } from '../sources/index.js';
 import { PROJECT_ROOT, resolveFromRoot } from '../utils/paths.js';
 
@@ -158,17 +160,6 @@ WantedBy=timers.target
 }
 
 const unitDir = (): string => join(homedir(), '.config', 'systemd', 'user');
-
-/** Perfil com a aprovação só se o currículo no disco for exatamente o aprovado (como o comando "analyze"). */
-function profileForRun(path: string): { profile: Profile; cvOk: boolean } {
-  const loaded = loadProfile(path);
-  if (loaded === undefined) throw new Error('Perfil não encontrado.');
-  if (loaded.approval === undefined) return { profile: loaded, cvOk: false };
-  const check = verifyApprovedCv(loaded);
-  return check.ok
-    ? { profile: loaded, cvOk: true }
-    : { profile: { ...loaded, approval: undefined }, cvOk: false };
-}
 
 /** Modo autônomo: opt-in, simulação por padrão, com trava de parada, limites e histórico no SQLite. */
 export function registerAutonomoCommands(program: Command, { withDb, withDbAsync }: Deps): void {
@@ -616,4 +607,6 @@ export function registerAutonomoCommands(program: Command, { withDb, withDbAsync
       writeFileSync(join(dir, 'autoestagio-autonomo.timer'), units.timer);
       console.log(`Unidades gravadas em ${dir}. Nada foi habilitado nem iniciado.`);
     });
+
+  registerExecCommand(cmd, { withDb, withDbAsync });
 }
