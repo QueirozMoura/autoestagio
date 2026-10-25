@@ -36,6 +36,7 @@ describe('CLI autonomo', () => {
     const units = systemdUnits({ node: '/usr/bin/node', root: '/proj' });
     expect(units.service).toContain('WorkingDirectory=/proj');
     expect(units.service).toContain('autonomo run --trigger timer');
+    expect(units.service).toContain('--prepare');
     expect(units.service).not.toMatch(/--real/);
     expect(units.timer).toContain('Persistent=true');
     expect(systemdUnits({ node: 'n', root: 'r', real: true }).service).toContain('--real');

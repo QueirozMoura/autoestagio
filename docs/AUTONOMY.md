@@ -1,5 +1,7 @@
 # Modo autônomo
 
+A preparação agendada e o relatório da madrugada estão descritos em [OVERNIGHT.md](OVERNIGHT.md).
+
 Pipeline que roda sem conversa aberta (inclusive por `systemd`): **coleta → análise → ranking → política →
 (conector) → registro**. Por padrão é **simulação**: decide o que faria, grava a decisão e **não envia nada**.
 O envio real exige política ligada, `real.authorized`, uma **concessão** vigente e `EMAIL_SEND_ENABLED=true`.

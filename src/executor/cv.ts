@@ -41,10 +41,15 @@ export function chooseCv(options: {
   variant: string | null;
   outputDir: string;
   profile: Profile;
+  onlyMaster?: boolean;
 }): ChosenCv | null {
   const wanted =
     options.variant !== null && KNOWN.has(options.variant) ? options.variant : 'generico';
-  for (const variant of wanted === 'generico' ? ['generico'] : [wanted, 'generico']) {
+  for (const variant of options.onlyMaster === true
+    ? []
+    : wanted === 'generico'
+      ? ['generico']
+      : [wanted, 'generico']) {
     const path = newestVariantPdf(options.outputDir, variant);
     if (path !== undefined)
       return {

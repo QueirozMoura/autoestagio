@@ -1,4 +1,5 @@
 import { existsSync } from 'node:fs';
+import type { ExecRunReport } from '../executor/run.js';
 import type { CvReference, Profile } from '../config/index.js';
 import type { Db } from '../db/index.js';
 import type { EmailContext } from '../email/index.js';
@@ -31,6 +32,7 @@ export class RunRefused extends Error {
 }
 
 export interface DiscoverySummary {
+  found?: number;
   newJobs: number;
   updatedJobs: number;
   errors: string[];
@@ -44,6 +46,8 @@ export interface RunOptions {
   trigger?: RunTrigger;
   /** Coleta de vagas (injetada). Ausente = não coleta; usa as vagas já gravadas. */
   discover?: () => Promise<DiscoverySummary>;
+  /** Preparo sem envio, executado sob a mesma trava da coleta/análise/fila. */
+  prepare?: () => Promise<ExecRunReport>;
   /** Arquivo de parada: se existir, a execução termina com segurança. */
   stopFile?: string;
   /** Limite diário do ambiente (MAX_APPLICATIONS_PER_DAY); vale o menor entre ele e o da política. */
@@ -68,6 +72,7 @@ export interface DecisionLine {
 }
 
 export interface RunReport {
+  preparation?: ExecRunReport;
   runId: number;
   mode: RunMode;
   status: RunStatus;
@@ -358,6 +363,17 @@ export async function runAutonomous(options: RunOptions): Promise<RunReport> {
       .sort((x, y) => y.count - x.count);
     report.opportunities = summarizeOpportunities(classifyOpportunities(db, profile, policy));
     report.queue = buildQueue(db, profile, policy, clock());
+    if (options.prepare !== undefined && !stopRequested()) {
+      report.preparation = await options.prepare();
+      report.queue.ready = { automatico: 0, assistido: 0 };
+      for (const row of db
+        .prepare(
+          "SELECT flow, COUNT(*) AS n FROM autonomous_queue WHERE status = 'pronta' GROUP BY flow",
+        )
+        .all() as { flow: 'automatico' | 'assistido'; n: number }[])
+        report.queue.ready[row.flow] = row.n;
+    }
+    if (stopRequested()) report.stopped = true;
     report.status = report.stopped ? 'interrompida' : 'concluida';
   } catch (error) {
     report.status = 'falhou';
@@ -370,6 +386,7 @@ export async function runAutonomous(options: RunOptions): Promise<RunReport> {
     report.status,
     clock().toISOString(),
     JSON.stringify({
+      discovery: report.discovery,
       analyzed: report.analyzed,
       verdicts: report.verdicts,
       counts: report.counts,
@@ -378,6 +395,7 @@ export async function runAutonomous(options: RunOptions): Promise<RunReport> {
       fresh: report.fresh,
       opportunities: report.opportunities,
       queue: report.queue,
+      preparation: report.preparation,
       discards: report.discards,
       errors: report.errors,
       stopped: report.stopped,

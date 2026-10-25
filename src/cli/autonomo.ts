@@ -36,6 +36,8 @@ import {
 import { runRealScan } from '../discovery/real-scan.js';
 import { buildContext } from './email-commands.js';
 import { registerExecCommand } from './exec.js';
+import { prepareUnattended } from '../autonomy/preparation.js';
+import { saveMorningReport } from '../autonomy/report.js';
 import { profileForRun } from './run-profile.js';
 import { loadSourcesConfig } from '../sources/index.js';
 import { PROJECT_ROOT, resolveFromRoot } from '../utils/paths.js';
@@ -119,6 +121,10 @@ export function formatRunReport(report: RunReport): string {
       'Motivos de descarte:',
       ...report.discards.map((d) => `  ${String(d.count).padStart(3)}× ${d.reason}`),
     );
+  if (report.preparation !== undefined)
+    out.push(
+      `Preparo (${report.preparation.mode}): ${report.preparation.items.length} item(ns); prontos para revisão: ${report.preparation.items.filter((i) => i.outcome === 'pronto_para_revisao').length}; demais exigem intervenção. Nenhum formulário é enviado pelo executor.`,
+    );
   for (const note of report.notes) out.push('', note);
   if (report.errors.length > 0) out.push('', `Erros: ${report.errors.join('; ')}`);
   return out.join('\n');
@@ -129,7 +135,7 @@ export function systemdUnits(options: { node: string; root: string; real?: boole
   service: string;
   timer: string;
 } {
-  const command = `autonomo run --trigger timer${options.real === true ? ' --real' : ''}`;
+  const command = `autonomo run --trigger timer --prepare${options.real === true ? ' --real' : ''}`;
   return {
     service: `[Unit]
 Description=AutoEstagio: execucao autonoma (${options.real === true ? 'REAL' : 'simulacao'})
@@ -176,64 +182,97 @@ export function registerAutonomoCommands(program: Command, { withDb, withDbAsync
     )
     .option('--real', 'envio real: exige política ligada, real.authorized e uma concessão vigente')
     .option('--no-scan', 'não coleta vagas; usa as já gravadas')
+    .option(
+      '--prepare',
+      'prepara formulários sem envio, sem perguntas pessoais nem aceite de termos',
+    )
+    .option('--plan-preparation', 'somente planeja o preparo; implica --prepare')
     .option('--trigger <origem>', 'manual ou timer', 'manual')
     .option('--json', 'saída em JSON')
-    .action(async (options: { real?: boolean; scan: boolean; trigger: string; json?: boolean }) => {
-      if (options.trigger !== 'manual' && options.trigger !== 'timer')
-        throw new Error('--trigger aceita "manual" ou "timer".');
-      const config = loadConfig();
-      const { profile, cvOk } = profileForRun(config.profilePath);
-      const policy = loadPolicy();
-      const discover = options.scan
-        ? async (): Promise<DiscoverySummary> => {
-            const report = await withDbAsync((db) =>
-              runRealScan({ db, config: loadSourcesConfig() }),
-            );
-            return {
-              newJobs: report.totals.new,
-              updatedJobs: report.totals.updated,
-              errors: report.sources.flatMap((source) =>
-                source.error === null
-                  ? []
-                  : [`fonte ${source.source}: ${source.errorCategory ?? 'erro'}`],
-              ),
-            };
-          }
-        : undefined;
-      try {
-        const report = await withDbAsync((db) => {
-          if (options.real === true && !cvOk)
-            throw new RunRefused(
-              'Envio real recusado: currículo aprovado ausente ou alterado no disco.',
-            );
-          const cv = profile.approval === undefined ? undefined : verifyApprovedCv(profile);
-          return runAutonomous({
-            db,
-            profile,
-            policy,
-            mode: options.real === true ? 'real' : 'simulacao',
-            trigger: options.trigger as 'manual' | 'timer',
-            ...(discover === undefined ? {} : { discover }),
-            ...(options.real === true && cv?.ok === true
-              ? { emailContext: buildContext(db, config, profile), cv: cv.cv }
-              : {}),
-            stopFile: STOP_FILE,
-            envMaxPerDay: config.maxApplicationsPerDay,
+    .action(
+      async (options: {
+        real?: boolean;
+        scan: boolean;
+        trigger: string;
+        json?: boolean;
+        prepare?: boolean;
+        planPreparation?: boolean;
+      }) => {
+        if (options.trigger !== 'manual' && options.trigger !== 'timer')
+          throw new Error('--trigger aceita "manual" ou "timer".');
+        const config = loadConfig();
+        const { profile, cvOk } = profileForRun(config.profilePath);
+        const policy = loadPolicy();
+        const discover = options.scan
+          ? async (): Promise<DiscoverySummary> => {
+              const report = await withDbAsync((db) =>
+                runRealScan({ db, config: loadSourcesConfig() }),
+              );
+              return {
+                found: report.totals.found,
+                newJobs: report.totals.new,
+                updatedJobs: report.totals.updated,
+                errors: report.sources.flatMap((source) =>
+                  source.error === null
+                    ? []
+                    : [`fonte ${source.source}: ${source.errorCategory ?? 'erro'}`],
+                ),
+              };
+            }
+          : undefined;
+        try {
+          const report = await withDbAsync((db) => {
+            if (options.real === true && !cvOk)
+              throw new RunRefused(
+                'Envio real recusado: currículo aprovado ausente ou alterado no disco.',
+              );
+            const cv = profile.approval === undefined ? undefined : verifyApprovedCv(profile);
+            return runAutonomous({
+              db,
+              profile,
+              policy,
+              mode: options.real === true ? 'real' : 'simulacao',
+              trigger: options.trigger as 'manual' | 'timer',
+              ...(discover === undefined ? {} : { discover }),
+              ...(options.prepare === true || options.planPreparation === true
+                ? {
+                    prepare: () =>
+                      prepareUnattended({
+                        db,
+                        profile,
+                        policy,
+                        root: PROJECT_ROOT,
+                        stopFile: STOP_FILE,
+                        planOnly: options.planPreparation === true,
+                      }),
+                  }
+                : {}),
+              ...(options.real === true && cv?.ok === true
+                ? { emailContext: buildContext(db, config, profile), cv: cv.cv }
+                : {}),
+              stopFile: STOP_FILE,
+              envMaxPerDay: config.maxApplicationsPerDay,
+            });
           });
-        });
-        console.log(
-          options.json === true ? JSON.stringify(report, null, 2) : formatRunReport(report),
-        );
-        if (report.status === 'falhou') process.exitCode = 1;
-      } catch (error) {
-        if (error instanceof RunRefused) {
-          console.error(error.message);
-          process.exitCode = 2;
-          return;
+          const paths = withDb((db) =>
+            saveMorningReport(db, report, resolveFromRoot('data/reports')),
+          );
+          console.log(
+            options.json === true
+              ? JSON.stringify({ ...report, reportFiles: paths }, null, 2)
+              : `${formatRunReport(report)}\nRelatório: ${paths.markdown}`,
+          );
+          if (report.status === 'falhou') process.exitCode = 1;
+        } catch (error) {
+          if (error instanceof RunRefused) {
+            console.error(error.message);
+            process.exitCode = 2;
+            return;
+          }
+          throw error;
         }
-        throw error;
-      }
-    });
+      },
+    );
 
   cmd
     .command('diagnose')

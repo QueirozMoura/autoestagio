@@ -54,6 +54,34 @@ const count = (table: string): number =>
   (db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get() as { n: number }).n;
 
 describe('execução autônoma em simulação', () => {
+  it('mantém a trava durante o preparo e grava o resultado no histórico', async () => {
+    apta();
+    let checked = false;
+    const report = await run(parsePolicy({}), {
+      prepare: async () => {
+        expect(count('autonomous_queue')).toBe(1);
+        await expect(run()).rejects.toThrow('Já existe uma execução');
+        checked = true;
+        return { mode: 'preparar', items: [], remainingReady: 0 };
+      },
+    });
+    expect(checked).toBe(true);
+    expect(report.status).toBe('concluida');
+    const stored = JSON.parse(listRuns(db)[0]?.summary ?? '{}') as {
+      preparation: { mode: string };
+    };
+    expect(stored.preparation.mode).toBe('preparar');
+  });
+
+  it('falha de inicialização do preparo encerra a trava com erro explícito', async () => {
+    const report = await run(parsePolicy({}), {
+      prepare: () => Promise.reject(new Error('navegador indisponível')),
+    });
+    expect(report.status).toBe('falhou');
+    expect(report.errors).toContain('execução: Error');
+    expect((await run()).status).toBe('concluida');
+  });
+
   it('vaga apta sem canal automático vira "pendente de canal"; nada é enviado nem criado', async () => {
     const id = apta();
     const report = await run();

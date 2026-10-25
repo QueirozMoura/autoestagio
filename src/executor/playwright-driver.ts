@@ -153,6 +153,7 @@ export interface LaunchOptions {
   profileDir: string;
   headless: boolean;
   executablePath?: string;
+  allowedDocumentHosts?: readonly string[];
 }
 
 /**
@@ -174,6 +175,12 @@ export async function launchSession(options: LaunchOptions): Promise<BrowserSess
   await context.route('**/*', async (route) => {
     try {
       if (/^https?:/.test(route.request().url())) assertSafeUrl(route.request().url());
+      if (
+        route.request().isNavigationRequest() &&
+        options.allowedDocumentHosts !== undefined &&
+        !options.allowedDocumentHosts.includes(new URL(route.request().url()).hostname)
+      )
+        throw new ExecutorError('Navegação para host sem revisão de preparo agendado.');
     } catch {
       await route.abort('blockedbyclient');
       return;

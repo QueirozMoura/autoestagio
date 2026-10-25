@@ -1,5 +1,5 @@
 import { mkdirSync } from 'node:fs';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import type { Profile } from '../config/index.js';
 import type { Db } from '../db/index.js';
 import { setQueueStatus } from '../autonomy/queue.js';
@@ -41,6 +41,10 @@ export interface ExecOptions {
   /** Depois de preencher, entrega a página a você; devolve true se aguardou a sua decisão. */
   review?: (item: ExecItemReport, page: PageDriver) => Promise<void>;
   now?: () => Date;
+  shouldStop?: () => boolean;
+  /** Agendamento: não reaproveita respostas pessoais/termos de outras sessões. */
+  unattended?: boolean;
+  allowedHosts?: readonly string[];
 }
 
 export interface ExecItemReport {
@@ -103,6 +107,7 @@ const pickNext = (
         `SELECT q.id, q.status, q.job_id, q.cv_variant, j.company, j.title, j.url, j.apply_url
            FROM autonomous_queue q JOIN jobs j ON j.id = q.job_id
           WHERE q.flow = 'assistido'
+            AND NOT EXISTS (SELECT 1 FROM applications a WHERE a.job_id = q.job_id)
             AND (q.status = 'pronta' OR (@id IS NOT NULL AND q.status = 'pendente_humano'))
             AND (@id IS NULL OR q.id = @id)
           ORDER BY q.priority`,
@@ -129,6 +134,7 @@ export async function runExecutor(options: ExecOptions): Promise<ExecRunReport> 
   mkdirSync(options.outputDir, { recursive: true, mode: 0o700 });
 
   while (reports.length < options.max) {
+    if (options.shouldStop?.() === true) break;
     const row = pickNext(db, options.itemId, taken);
     if (row === undefined) break;
     taken.add(row.id);
@@ -177,6 +183,8 @@ async function processItem(options: ExecOptions, row: QueueRow): Promise<ExecIte
   try {
     const target = row.apply_url ?? row.url;
     const link = assertSafeUrl(target);
+    if (options.allowedHosts !== undefined && !options.allowedHosts.includes(link.hostname))
+      throw new ExecutorError('Host sem revisão para preparo agendado: requer intervenção humana.');
     report.url = `${link.origin}${link.pathname}`;
     page = await options.session.newPage();
     await page.goto(link.toString());
@@ -204,6 +212,7 @@ async function processItem(options: ExecOptions, row: QueueRow): Promise<ExecIte
       variant: row.cv_variant,
       outputDir: options.cvDir,
       profile: options.profile,
+      onlyMaster: options.unattended === true,
     });
     if (cv === null)
       step('selecionar_curriculo', 'bloqueado', 'nenhum currículo aprovado disponível');
@@ -220,7 +229,7 @@ async function processItem(options: ExecOptions, row: QueueRow): Promise<ExecIte
       applicant,
       salary: options.salary,
       cv: cv === null ? null : { path: cv.path, label: cv.label },
-      answers: options.answersFor?.(row.id) ?? [],
+      answers: options.unattended === true ? [] : (options.answersFor?.(row.id) ?? []),
       profile: {
         course: options.profile.education.course,
         institution: options.profile.education.institution,
@@ -243,7 +252,9 @@ async function processItem(options: ExecOptions, row: QueueRow): Promise<ExecIte
     );
 
     if (options.mode === 'preparar') {
-      await apply(page, model, plan.actions, report, cv, applicant, step);
+      if (options.shouldStop?.() === true)
+        throw new ExecutorError('Parada solicitada antes do preenchimento.');
+      await apply(page, model, plan.actions, report, cv, applicant, step, options.shouldStop);
       // Formulários dinâmicos: depois de preencher, releia; campos novos que apareceram também são tratados.
       const done = new Set(plan.actions.map((a) => `${a.source}|${a.label}`));
       for (let pass = 2; pass <= 3; pass++) {
@@ -262,7 +273,7 @@ async function processItem(options: ExecOptions, row: QueueRow): Promise<ExecIte
           'ok',
           `passada ${pass}: ${fresh.length} campo(s) novo(s) apareceram`,
         );
-        await apply(page, reread, fresh, report, cv, applicant, step);
+        await apply(page, reread, fresh, report, cv, applicant, step, options.shouldStop);
         for (const a of fresh) done.add(`${a.source}|${a.label}`);
       }
     } else step('preencher', 'pulado', 'modo planejar: nada foi preenchido nem anexado');
@@ -335,7 +346,7 @@ const digits = (value: string): string => value.replace(/\D/g, '');
 
 /** O que a página mostra equivale ao que se quis escrever? Telefone aceita com ou sem o código do país. */
 function matches(action: FillAction, readBack: string): boolean {
-  if (action.op === 'upload') return readBack !== '';
+  if (action.op === 'upload') return readBack === basename(action.value);
   if (action.op === 'select' || action.op === 'choose')
     return readBack.trim().toLowerCase() === action.value.trim().toLowerCase();
   const wanted = digits(action.value);
@@ -360,9 +371,11 @@ async function apply(
   cv: ChosenCv | null,
   applicant: Applicant,
   step: (name: string, state: Step['state'], detail: string) => void,
+  shouldStop?: () => boolean,
 ): Promise<void> {
   const byId = new Map(form.fields.map((f) => [f.id, f]));
   for (const action of actions) {
+    if (shouldStop?.() === true) throw new ExecutorError('Parada solicitada durante o preparo.');
     const field = byId.get(action.fieldId);
     if (field === undefined) continue;
     const shown = action.op === 'upload' ? (cv?.label ?? '') : displayValue(action, applicant);
@@ -437,6 +450,18 @@ async function finish(
 ): Promise<ExecItemReport> {
   const { db } = options;
   const at = (options.now ?? (() => new Date()))();
+  if (page !== undefined && report.screenshot === null && options.mode === 'preparar') {
+    const shot = join(
+      options.outputDir,
+      `fila-${row.id}-${startedAt.toISOString().replace(/[:.]/g, '-')}.png`,
+    );
+    try {
+      await page.screenshot(shot);
+      report.screenshot = shot;
+    } catch {
+      report.notes.push('Não foi possível capturar a página bloqueada.');
+    }
+  }
   if (page !== undefined && !keepOpen) await page.close();
   db.prepare(
     `INSERT INTO autonomous_executions

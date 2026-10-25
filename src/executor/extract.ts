@@ -97,7 +97,7 @@ export const EXTRACT_FORM_SCRIPT = String.raw`(() => {
       seenGroups.add(group);
     }
     // Entrada interna de um componente já lido (ex.: o campo de busca de uma lista): sem rótulo, nome nem dica.
-    if (!clean(el.getAttribute('aria-label') || el.getAttribute('placeholder') || el.getAttribute('name') || el.id || '')) {
+    if (!clean(el.getAttribute('aria-label') || el.getAttribute('placeholder') || el.getAttribute('name') || el.id || labelOf(el) || '')) {
       let up = el.parentElement;
       let inner = false;
       for (let i = 0; i < 3 && up; i += 1, up = up.parentElement) if (lastEl && up.contains(lastEl)) { inner = true; break; }
