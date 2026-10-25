@@ -3,7 +3,7 @@ import { candidateEmail } from './email-connector.js';
 
 /**
  * Conectores de envio. Cada um diz se PODE enviar a candidatura de uma vaga e por quê. Nenhum conector deste arquivo
- * envia nada: o envio real é uma etapa à parte e só existe para conectores que implementarem `send` (hoje nenhum).
+ * envia nada: o envio real é uma etapa à parte, implementada em email-connector.ts e condicionada à autorização.
  * Portais com reCAPTCHA, login ou chave de API da empresa ficam como "indisponíveis" de propósito: não se contorna
  * CAPTCHA, anti-bot, login nem termos das plataformas.
  */

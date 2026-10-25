@@ -66,6 +66,8 @@ export interface EmailContext {
   now?: () => Date;
   /** Só para testes de concorrência: executa logo antes da reserva atômica do envio. */
   beforeReserve?: () => void | Promise<void>;
+  /** Revalida concessão, manifesto e parada antes da reserva; não produz efeitos externos. */
+  automationGuard?: () => string | null;
 }
 
 const sha256 = (data: Buffer | string): string => createHash('sha256').update(data).digest('hex');
@@ -869,6 +871,8 @@ export async function sendEmail(
   const startedAt = clock(ctx);
 
   await ctx.beforeReserve?.();
+  const guardFailure = ctx.automationGuard?.();
+  if (guardFailure) throw new EmailError('autorizacao', guardFailure);
   // 1) Reserva atômica: consome a autorização e grava a intenção ANTES de tocar no Gmail.
   const dispatchId = ctx.db
     .transaction((): number => {

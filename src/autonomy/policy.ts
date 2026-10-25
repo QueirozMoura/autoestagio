@@ -68,6 +68,11 @@ export const policySchema = z
         authorized: z.boolean().default(false),
         /** Conectores permitidos (ex.: "email"). Vazio = nenhum. */
         connectors: list,
+        /** Vincula a concessão ao manifesto completo de vagas, dados e permissões revistos. */
+        autoApplyManifestSha256: z
+          .string()
+          .regex(/^[a-f0-9]{64}$/)
+          .optional(),
       })
       .prefault({}),
   })

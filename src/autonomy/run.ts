@@ -1,4 +1,11 @@
-import { existsSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import {
+  checkAutoApply,
+  autoApplyStates,
+  type AutoApplyLoader,
+  type AutoApplyCheck,
+} from './auto-apply.js';
 import type { ExecRunReport } from '../executor/run.js';
 import type { CvReference, Profile } from '../config/index.js';
 import type { Db } from '../db/index.js';
@@ -48,6 +55,9 @@ export interface RunOptions {
   discover?: () => Promise<DiscoverySummary>;
   /** Preparo sem envio, executado sob a mesma trava da coleta/análise/fila. */
   prepare?: () => Promise<ExecRunReport>;
+  autoApply?: { load: AutoApplyLoader; evidenceDir?: string };
+  currentPolicy?: () => Policy;
+  currentProfile?: () => Profile;
   /** Arquivo de parada: se existir, a execução termina com segurança. */
   stopFile?: string;
   /** Limite diário do ambiente (MAX_APPLICATIONS_PER_DAY); vale o menor entre ele e o da política. */
@@ -72,6 +82,10 @@ export interface DecisionLine {
 }
 
 export interface RunReport {
+  autoApply?: {
+    checks: ({ jobId: number } & AutoApplyCheck)[];
+    states: ReturnType<typeof autoApplyStates>;
+  };
   preparation?: ExecRunReport;
   runId: number;
   mode: RunMode;
@@ -129,7 +143,7 @@ function acquire(db: Db, options: RunOptions, now: Date): number {
 /**
  * Execução autônoma: coleta (opcional) → análise → candidatas em ordem transparente → decisão da política por vaga →
  * registro. No modo simulação NADA é enviado nem se cria candidatura. No modo real, só com autorização válida e
- * conector que envie; hoje nenhum conector envia, então tudo vira "pendente de canal". Duas execuções simultâneas não
+ * conector que envie; o canal implementado é e-mail via API oficial do Gmail, com todos os portões. Duas execuções simultâneas não
  * ocorrem (trava no banco) e cada vaga recebe no máximo uma candidatura (UNIQUE no banco).
  */
 export async function runAutonomous(options: RunOptions): Promise<RunReport> {
@@ -175,6 +189,7 @@ export async function runAutonomous(options: RunOptions): Promise<RunReport> {
     stopped: false,
     notes,
   };
+  if (options.autoApply) report.autoApply = { checks: [], states: [] };
   const stopRequested = (): boolean =>
     options.stopFile !== undefined && existsSync(options.stopFile);
 
@@ -266,6 +281,22 @@ export async function runAutonomous(options: RunOptions): Promise<RunReport> {
       const base = decideJob(db, policy, facts);
       decision = base.kind;
       reasons = base.reasons;
+      if (options.autoApply !== undefined) {
+        const check = checkAutoApply({
+          db,
+          profile,
+          policy,
+          jobId: row.id,
+          load: options.autoApply.load,
+          now: clock(),
+          real: mode === 'real',
+        });
+        report.autoApply?.checks.push({ jobId: row.id, ...check });
+        if (decision === 'candidatar' && !check.ok) {
+          decision = 'pendente';
+          reasons = [`AUTO_APPLY bloqueado: ${check.reason}`];
+        }
+      }
       if (decision === 'candidatar') {
         if (accepted >= effective) {
           decision = 'limite_atingido';
@@ -290,7 +321,39 @@ export async function runAutonomous(options: RunOptions): Promise<RunReport> {
             );
             const attempt = await attemptEmail(
               {
-                ctx: options.emailContext as EmailContext,
+                ctx: {
+                  ...(options.emailContext as EmailContext),
+                  automationGuard: () => {
+                    if (stopRequested())
+                      return 'Parada solicitada; envio cancelado antes da reserva.';
+                    if (
+                      options.currentProfile &&
+                      profileHash(options.currentProfile()) !== profileHash(profile)
+                    )
+                      return 'Perfil alterado durante a execução.';
+                    const activePolicy = options.currentPolicy?.() ?? policy;
+                    const authorization = realAuthorization(activePolicy, latestGrant(db), clock());
+                    if (!authorization.ok) return authorization.reason;
+                    if (
+                      authorization.grant.id !== grant?.id ||
+                      policyHash(activePolicy) !== policyHash(policy)
+                    )
+                      return 'Concessão/política mudou durante a execução.';
+                    if (options.autoApply) {
+                      const checked = checkAutoApply({
+                        db,
+                        profile,
+                        policy: activePolicy,
+                        jobId: row.id,
+                        load: options.autoApply.load,
+                        now: clock(),
+                        real: true,
+                      });
+                      if (!checked.ok) return checked.reason;
+                    }
+                    return null;
+                  },
+                },
                 profile,
                 cv: options.cv as CvReference,
                 grantId: grant?.id ?? 0,
@@ -318,6 +381,31 @@ export async function runAutonomous(options: RunOptions): Promise<RunReport> {
                 'UPDATE autonomous_decisions SET decision = ?, reasons = ?, evidence = ? WHERE id = ?',
               ).run(decision, JSON.stringify(reasons), attempt.evidence, decisionId);
               line.evidence = attempt.evidence;
+              if (options.autoApply?.evidenceDir !== undefined) {
+                mkdirSync(options.autoApply.evidenceDir, { recursive: true, mode: 0o700 });
+                const receipt = db
+                  .prepare(
+                    'SELECT id, application_id, status, gmail_message_id, reserved_at, finished_at FROM email_dispatches WHERE id = ?',
+                  )
+                  .get(attempt.dispatchId ?? -1);
+                writeFileSync(
+                  join(options.autoApply.evidenceDir, `run-${runId}-job-${row.id}.json`),
+                  JSON.stringify(
+                    {
+                      runId,
+                      jobId: row.id,
+                      outcome: attempt.outcome,
+                      evidence: attempt.evidence,
+                      receipt: receipt ?? null,
+                      permission: report.autoApply?.checks.find((check) => check.jobId === row.id),
+                      confirmedByRecipient: false,
+                    },
+                    null,
+                    2,
+                  ),
+                  { mode: 0o600 },
+                );
+              }
               accepted++;
               report.limits.sentToday++;
               persisted = true;
@@ -386,6 +474,10 @@ export async function runAutonomous(options: RunOptions): Promise<RunReport> {
     report.status,
     clock().toISOString(),
     JSON.stringify({
+      autoApply:
+        report.autoApply === undefined
+          ? undefined
+          : { ...report.autoApply, states: autoApplyStates(db) },
       discovery: report.discovery,
       analyzed: report.analyzed,
       verdicts: report.verdicts,
@@ -402,6 +494,7 @@ export async function runAutonomous(options: RunOptions): Promise<RunReport> {
     }),
     runId,
   );
+  if (report.autoApply) report.autoApply.states = autoApplyStates(db);
   return report;
 }
 

@@ -19,9 +19,9 @@ describe('parseEnv', () => {
     expect(() => parseEnv({ APPLY_MODE: 'auto' })).toThrow(/ALLOW_AUTO_APPLY/);
   });
 
-  it('rejeita o modo auto mesmo com a trava, pois ainda não está implementado', () => {
+  it('exige AUTO_APPLY=real mesmo com ALLOW_AUTO_APPLY', () => {
     expect(() => parseEnv({ APPLY_MODE: 'auto', ALLOW_AUTO_APPLY: 'true' })).toThrow(
-      /ainda não foi implementado/,
+      /AUTO_APPLY=real/,
     );
   });
 
@@ -46,10 +46,10 @@ describe('parseEnv — canal de e-mail', () => {
     expect(() => parseEnv({ EMAIL_SEND_ENABLED: '1' })).toThrow(ConfigError);
   });
 
-  it('o modo auto continua indisponível mesmo com o e-mail ligado', () => {
+  it('ligar o e-mail não substitui a opção explícita AUTO_APPLY', () => {
     expect(() =>
       parseEnv({ APPLY_MODE: 'auto', ALLOW_AUTO_APPLY: 'true', EMAIL_SEND_ENABLED: 'true' }),
-    ).toThrow(/ainda não foi implementado/);
+    ).toThrow(/AUTO_APPLY=real/);
   });
 });
 
@@ -57,5 +57,18 @@ describe('parseEnv — modelo mestre do currículo', () => {
   it('o caminho do modelo tem padrão em config/ (fora do Git) e pode ser sobrescrito', () => {
     expect(parseEnv({}).cvModelPath).toBe('config/cv-master.json');
     expect(parseEnv({ CV_MODEL_PATH: 'x/y.json' }).cvModelPath).toBe('x/y.json');
+  });
+});
+
+describe('AUTO_APPLY', () => {
+  it('fica desligado por padrão e simulação não exige habilitar envio', () => {
+    expect(parseEnv({}).autoApplyMode).toBe('off');
+    expect(parseEnv({ AUTO_APPLY: 'simulate' }).autoApplyMode).toBe('simulate');
+  });
+  it('aceita modo real apenas com opt-in explícito, sem ligar e-mail por conta própria', () => {
+    expect(() => parseEnv({ AUTO_APPLY: 'real' })).toThrow(/ALLOW_AUTO_APPLY/);
+    const config = parseEnv({ APPLY_MODE: 'auto', AUTO_APPLY: 'real', ALLOW_AUTO_APPLY: 'true' });
+    expect(config.applyMode).toBe('auto');
+    expect(config.emailSendEnabled).toBe(false);
   });
 });

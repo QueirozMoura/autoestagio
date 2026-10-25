@@ -132,6 +132,8 @@ export async function attemptEmail(deps: EmailAttemptDeps, jobId: number): Promi
   let applicationId: number | undefined;
   let reserved = false;
   try {
+    const guardFailure = ctx.automationGuard?.();
+    if (guardFailure) return pending(guardFailure);
     if (ctx.testMailbox === undefined)
       return pending(
         'sem caixa de teste configurada (config/email.json): o teste prévio é obrigatório',

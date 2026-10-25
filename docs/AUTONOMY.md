@@ -1,6 +1,7 @@
 # Modo autônomo
 
 A preparação agendada e o relatório da madrugada estão descritos em [OVERNIGHT.md](OVERNIGHT.md).
+O envio autônomo com manifesto de permissões, desligado por padrão, está em [AUTO_APPLY.md](AUTO_APPLY.md).
 
 Pipeline que roda sem conversa aberta (inclusive por `systemd`): **coleta → análise → ranking → política →
 (conector) → registro**. Por padrão é **simulação**: decide o que faria, grava a decisão e **não envia nada**.

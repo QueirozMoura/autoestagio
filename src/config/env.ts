@@ -14,6 +14,8 @@ const envSchema = z
     PROFILE_PATH: z.string().min(1).default('config/profile.json'),
     APPLY_MODE: z.enum(APPLY_MODES).default('dry-run'),
     ALLOW_AUTO_APPLY: booleanString,
+    /** O modo real ainda exige política, manifesto, concessão e EMAIL_SEND_ENABLED. */
+    AUTO_APPLY: z.enum(['off', 'simulate', 'real']).default('off'),
     MAX_APPLICATIONS_PER_DAY: z.coerce.number().int().min(0).max(100).default(10),
     /** Trava mestra do envio de e-mails (inclusive de teste). Desligada por padrão. */
     EMAIL_SEND_ENABLED: booleanString,
@@ -24,6 +26,12 @@ const envSchema = z
     CV_MODEL_PATH: z.string().min(1).default('config/cv-master.json'),
   })
   .superRefine((env, ctx) => {
+    if (env.AUTO_APPLY === 'real' && !env.ALLOW_AUTO_APPLY)
+      ctx.addIssue({
+        code: 'custom',
+        path: ['AUTO_APPLY'],
+        message: 'AUTO_APPLY=real exige ALLOW_AUTO_APPLY=true',
+      });
     if (env.APPLY_MODE !== 'auto') return;
     if (!env.ALLOW_AUTO_APPLY) {
       ctx.addIssue({
@@ -32,12 +40,12 @@ const envSchema = z
         message: 'o modo "auto" exige ALLOW_AUTO_APPLY=true (desabilitado por padrão)',
       });
     }
-    // Trava de segurança: o modo automático será implementado em etapa futura.
-    ctx.addIssue({
-      code: 'custom',
-      path: ['APPLY_MODE'],
-      message: 'o modo "auto" ainda não foi implementado; use "dry-run" ou "manual"',
-    });
+    if (env.AUTO_APPLY !== 'real')
+      ctx.addIssue({
+        code: 'custom',
+        path: ['AUTO_APPLY'],
+        message: 'APPLY_MODE=auto exige AUTO_APPLY=real; para ensaio use AUTO_APPLY=simulate',
+      });
   });
 
 export interface AppConfig {
@@ -45,6 +53,7 @@ export interface AppConfig {
   profilePath: string;
   applyMode: ApplyMode;
   allowAutoApply: boolean;
+  autoApplyMode: 'off' | 'simulate' | 'real';
   maxApplicationsPerDay: number;
   emailSendEnabled: boolean;
   oauthClientPath: string;
@@ -64,6 +73,7 @@ export function parseEnv(source: Record<string, string | undefined>): AppConfig 
     profilePath: env.PROFILE_PATH,
     applyMode: env.APPLY_MODE,
     allowAutoApply: env.ALLOW_AUTO_APPLY,
+    autoApplyMode: env.AUTO_APPLY,
     maxApplicationsPerDay: env.MAX_APPLICATIONS_PER_DAY,
     emailSendEnabled: env.EMAIL_SEND_ENABLED,
     oauthClientPath: env.GOOGLE_OAUTH_CLIENT_PATH,

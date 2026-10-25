@@ -36,9 +36,12 @@ import {
 import { runRealScan } from '../discovery/real-scan.js';
 import { buildContext } from './email-commands.js';
 import { registerExecCommand } from './exec.js';
+import { loadAutoApplyManifest, checkAutoApply, autoApplyStates } from '../autonomy/auto-apply.js';
 import { prepareUnattended } from '../autonomy/preparation.js';
 import { saveMorningReport } from '../autonomy/report.js';
 import { profileForRun } from './run-profile.js';
+import { candidateEmail } from '../autonomy/email-connector.js';
+import { profileHash } from '../eligibility/index.js';
 import { loadSourcesConfig } from '../sources/index.js';
 import { PROJECT_ROOT, resolveFromRoot } from '../utils/paths.js';
 
@@ -180,6 +183,10 @@ export function registerAutonomoCommands(program: Command, { withDb, withDbAsync
     .description(
       'Executa o pipeline. Padrão: simulação (nada é enviado e nenhuma candidatura é criada)',
     )
+    .option(
+      '--auto-apply',
+      'avalia envio autônomo com manifesto de permissões; simulação por padrão',
+    )
     .option('--real', 'envio real: exige política ligada, real.authorized e uma concessão vigente')
     .option('--no-scan', 'não coleta vagas; usa as já gravadas')
     .option(
@@ -192,6 +199,7 @@ export function registerAutonomoCommands(program: Command, { withDb, withDbAsync
     .action(
       async (options: {
         real?: boolean;
+        autoApply?: boolean;
         scan: boolean;
         trigger: string;
         json?: boolean;
@@ -203,6 +211,10 @@ export function registerAutonomoCommands(program: Command, { withDb, withDbAsync
         const config = loadConfig();
         const { profile, cvOk } = profileForRun(config.profilePath);
         const policy = loadPolicy();
+        const realRequested = options.real === true || config.autoApplyMode === 'real';
+        const strictAutoApply =
+          options.autoApply === true || config.autoApplyMode !== 'off' || realRequested;
+        const loadManifest = () => loadAutoApplyManifest(resolveFromRoot('config/auto-apply.json'));
         const discover = options.scan
           ? async (): Promise<DiscoverySummary> => {
               const report = await withDbAsync((db) =>
@@ -222,7 +234,9 @@ export function registerAutonomoCommands(program: Command, { withDb, withDbAsync
           : undefined;
         try {
           const report = await withDbAsync((db) => {
-            if (options.real === true && !cvOk)
+            if (realRequested && !config.allowAutoApply)
+              throw new RunRefused('AUTO_APPLY real exige ALLOW_AUTO_APPLY=true.');
+            if (realRequested && !cvOk)
               throw new RunRefused(
                 'Envio real recusado: currículo aprovado ausente ou alterado no disco.',
               );
@@ -231,8 +245,18 @@ export function registerAutonomoCommands(program: Command, { withDb, withDbAsync
               db,
               profile,
               policy,
-              mode: options.real === true ? 'real' : 'simulacao',
+              mode: realRequested ? 'real' : 'simulacao',
               trigger: options.trigger as 'manual' | 'timer',
+              currentPolicy: loadPolicy,
+              currentProfile: () => profileForRun(config.profilePath).profile,
+              ...(strictAutoApply
+                ? {
+                    autoApply: {
+                      load: loadManifest,
+                      evidenceDir: resolveFromRoot('data/auto-apply-evidence'),
+                    },
+                  }
+                : {}),
               ...(discover === undefined ? {} : { discover }),
               ...(options.prepare === true || options.planPreparation === true
                 ? {
@@ -247,7 +271,7 @@ export function registerAutonomoCommands(program: Command, { withDb, withDbAsync
                       }),
                   }
                 : {}),
-              ...(options.real === true && cv?.ok === true
+              ...(realRequested && cv?.ok === true
                 ? { emailContext: buildContext(db, config, profile), cv: cv.cv }
                 : {}),
               stopFile: STOP_FILE,
@@ -273,6 +297,63 @@ export function registerAutonomoCommands(program: Command, { withDb, withDbAsync
         }
       },
     );
+
+  cmd
+    .command('auto-apply')
+    .description('Diagnóstico AUTO_APPLY somente leitura: evidências, vagas autorizadas e estados')
+    .option('--json', 'saída em JSON')
+    .action((options: { json?: boolean }) => {
+      const { profile } = profileForRun(loadConfig().profilePath);
+      const policy = loadPolicy();
+      const load = () => loadAutoApplyManifest(resolveFromRoot('config/auto-apply.json'));
+      const result = withDb((db) => {
+        const jobs = db
+          .prepare(
+            'SELECT j.id, j.title, j.description, j.content_hash FROM jobs j WHERE NOT EXISTS (SELECT 1 FROM applications a WHERE a.job_id = j.id)',
+          )
+          .all() as {
+          id: number;
+          title: string;
+          description: string | null;
+          content_hash: string;
+        }[];
+        const checks = jobs.map((job) => ({
+          jobId: job.id,
+          title: job.title,
+          jobContentHash: job.content_hash,
+          invitationByEmail: candidateEmail(job.description).ok,
+          ...checkAutoApply({
+            db,
+            profile,
+            policy,
+            jobId: job.id,
+            load,
+            now: new Date(),
+            real: false,
+          }),
+        }));
+        const snapshot = load();
+        const authorization = realAuthorization(policy, latestGrant(db), new Date());
+        return {
+          manifestSha256: snapshot.sha256,
+          manifestEnabled: snapshot.manifest.enabled,
+          checked: checks.length,
+          eligible: checks.filter((check) => check.ok).length,
+          emailInvitations: checks.filter((check) => check.invitationByEmail).length,
+          profileHash: profileHash(profile),
+          approvedCvSha256: profile.approval?.cvSha256 ?? null,
+          implementedChannels: ['email'],
+          realAuthorization: authorization.ok ? 'vigente' : authorization.reason,
+          checks,
+          states: autoApplyStates(db),
+        };
+      });
+      console.log(
+        options.json
+          ? JSON.stringify(result, null, 2)
+          : `AUTO_APPLY: ${result.eligible} vaga(s) elegível(is) de ${result.checked}; manifesto ${result.manifestEnabled ? 'ligado' : 'desligado'}. SHA-256: ${result.manifestSha256}. Autorização real: ${result.realAuthorization}.\n${result.checks.map((check) => `#${check.jobId}: ${check.ok ? 'compatível' : 'pendente_humano'} — ${check.reason}`).join('\n')}`,
+      );
+    });
 
   cmd
     .command('diagnose')

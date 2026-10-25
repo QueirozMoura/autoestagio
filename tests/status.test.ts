@@ -20,6 +20,7 @@ function makeConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     profilePath: join(PROJECT_ROOT, 'config', 'profile.example.json'),
     applyMode: 'dry-run',
     allowAutoApply: false,
+    autoApplyMode: 'off',
     maxApplicationsPerDay: 10,
     emailSendEnabled: false,
     oauthClientPath: join(dir, 'client.json'),

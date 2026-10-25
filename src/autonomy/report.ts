@@ -24,6 +24,8 @@ export function saveMorningReport(
     autoChannelCompatible: report.opportunities.buckets.automatizavel,
     wouldSend: report.counts.candidatar ?? 0,
     sent: report.counts.enviada ?? 0,
+    autoApplyAuthorized: report.autoApply?.checks.filter((check) => check.ok).length ?? 0,
+    confirmed: report.autoApply?.states.filter((state) => state.state === 'confirmada').length ?? 0,
     humanRequired: queue.filter((q) => q.status === 'pendente_humano').length,
     remainingReady: queue.filter((q) => q.status === 'pronta').length,
   };
@@ -54,6 +56,17 @@ export function saveMorningReport(
     '',
     '## Limites e bloqueios',
     '',
+    ...(report.autoApply
+      ? [
+          `AUTO_APPLY: ${summary.autoApplyAuthorized} vaga(s) com manifesto compatível. Aceite da API de e-mail não comprova recebimento pelo recrutador.`,
+          ...report.autoApply.checks
+            .filter((check) => !check.ok)
+            .map((check) => `- Vaga ${check.jobId}: ${check.reason}`),
+          '',
+          'Estados das candidaturas:',
+          ...report.autoApply.states.map((state) => `- Vaga ${state.jobId}: ${state.state}`),
+        ]
+      : []),
     'Preparação nunca aciona envio. Login, CAPTCHA, avaliação, termos, autodeclarações e perguntas sem dados comprovados exigem revisão humana. Formulários preenchidos em sessão headless são evidenciados por captura; não são rascunhos garantidamente salvos pelo portal.',
     ...report.notes,
     ...report.errors.map((e) => `Erro: ${e}`),

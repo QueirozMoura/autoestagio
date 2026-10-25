@@ -14,6 +14,7 @@ config/cv-master.json.bak
 config/autonomy.json
 config/applicant.json
 config/answers.json
+config/auto-apply.json
 
 # spikes: dependências e saídas geradas (reproduzíveis)
 spikes/*/node_modules/

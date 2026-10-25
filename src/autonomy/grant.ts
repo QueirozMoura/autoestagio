@@ -36,6 +36,7 @@ export function previewGrant(policy: Policy, days: number, now: Date): GrantPrev
     validUntil,
     summary: [
       `Conectores: ${policy.real.connectors.join(', ') || '(nenhum)'}`,
+      `Manifesto AUTO_APPLY (SHA-256): ${policy.real.autoApplyManifestSha256 ?? '(ausente: AUTO_APPLY real bloqueado)'}`,
       `Limites: ${policy.limits.maxPerRun} por execução, ${policy.limits.maxPerDay} por dia; intervalo mínimo efetivo entre e-mails: ${effectiveInterval(policy)} s`,
       `Pretensão salarial: ${policy.salaryExpectation.currency} ${policy.salaryExpectation.amount}; bolsa mínima divulgada: ${policy.rules.minStipend}`,
       `Vereditos aceitos: ${policy.rules.verdicts.join(', ')}; desconhecidos tolerados: ${policy.rules.tolerateUnknown.join(', ') || 'nenhum'}`,
