@@ -13,6 +13,7 @@ export type FieldKind =
   | 'radio'
   | 'checkbox'
   | 'file'
+  | 'combobox'
   | 'other';
 
 export interface FieldModel {
@@ -44,6 +45,12 @@ export interface PageSignals {
   captchaPresent: boolean;
   fieldCount: number;
   submitLabels: string[];
+  /** O botão de envio está habilitado? (null = não encontrado). Só leitura: o executor nunca o aciona. */
+  /** Rótulo do botão de envio realmente avaliado (ex.: "Submit application"). */
+  submitLabel: string | null;
+  submitEnabled: boolean | null;
+  /** Mensagens de erro/validação visíveis e campos marcados como inválidos. */
+  errors: string[];
 }
 
 export interface FormModel {
@@ -52,7 +59,7 @@ export interface FormModel {
   fields: FieldModel[];
 }
 
-export type FillOp = 'fill' | 'select' | 'upload';
+export type FillOp = 'fill' | 'select' | 'choose' | 'upload';
 
 export interface FillAction {
   fieldId: string;

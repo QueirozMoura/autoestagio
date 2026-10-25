@@ -7,6 +7,7 @@ import {
   ApplicantError,
   ExecutorError,
   launchSession,
+  loadAnswers,
   loadApplicant,
   runExecutor,
   type ExecItemReport,
@@ -59,6 +60,10 @@ export function formatExecItem(item: ExecItemReport): string {
     out.push(`  Opcionais deixados em branco: ${item.skipped.map((s) => s.label).join('; ')}`);
   if (item.cv !== null)
     out.push(`  Currículo: ${item.cv.label} (sha ${item.cv.sha8}; ${item.cv.note})`);
+  if (item.final !== null)
+    out.push(
+      `  Verificação final: botão "${item.final.submitLabel ?? '?'}" ${item.final.submitEnabled === null ? 'não encontrado' : item.final.submitEnabled ? 'HABILITADO' : 'DESABILITADO'}; erros de validação visíveis: ${item.final.errors.length === 0 ? 'nenhum' : item.final.errors.join(' | ')}`,
+    );
   if (item.screenshot !== null) out.push(`  Captura de tela: ${item.screenshot}`);
   if (item.evidence !== null) out.push(`  EVIDÊNCIA: ${item.evidence}`);
   out.push(
@@ -83,7 +88,7 @@ export function registerExecCommand(cmd: Command, { withDbAsync }: Deps): void {
       'Executor assistido: prepara a próxima candidatura da fila no navegador e PARA antes do envio',
     )
     .option('--max <n>', 'quantas vagas processar', '1')
-    .option('--item <id>', 'processa só este item da fila')
+    .option('--item <id>', 'processa só este item da fila, inclusive pendente_humano para retomada')
     .option(
       '--planejar',
       'só lê a página e mostra o que preencheria (nada é preenchido nem anexado)',
@@ -96,6 +101,10 @@ export function registerExecCommand(cmd: Command, { withDbAsync }: Deps): void {
       '--revisar',
       'mantém a janela aberta para você revisar e enviar; depois procura a confirmação (implica --com-janela)',
     )
+    .option(
+      '--manter-aberto',
+      'abre a janela, prepara a vaga e a mantém aberta para a sua revisão até você fechá-la (não conclui nada)',
+    )
     .option('--json', 'saída em JSON')
     .action(
       async (options: {
@@ -104,6 +113,7 @@ export function registerExecCommand(cmd: Command, { withDbAsync }: Deps): void {
         planejar?: boolean;
         comJanela?: boolean;
         revisar?: boolean;
+        manterAberto?: boolean;
         json?: boolean;
       }) => {
         const config = loadConfig();
@@ -111,7 +121,8 @@ export function registerExecCommand(cmd: Command, { withDbAsync }: Deps): void {
         const policy = loadPolicy();
         try {
           const applicant = loadApplicant();
-          const headed = options.comJanela === true || options.revisar === true;
+          const headed =
+            options.comJanela === true || options.revisar === true || options.manterAberto === true;
           if (options.revisar === true && options.planejar === true)
             throw new ExecutorError('--revisar não combina com --planejar.');
           const session = await launchSession({
@@ -131,6 +142,19 @@ export function registerExecCommand(cmd: Command, { withDbAsync }: Deps): void {
                 ...(options.item === undefined ? {} : { itemId: Number(options.item) }),
                 outputDir: resolveFromRoot('data/exec'),
                 cvDir: resolveFromRoot('data/cv-output'),
+                answersFor: (queueId: number) => loadAnswers(queueId),
+                ...(options.manterAberto === true
+                  ? {
+                      holdOnly: true,
+                      review: async (item: ExecItemReport) => {
+                        console.log(`\n${formatExecItem(item)}`);
+                        console.log(
+                          '\nJanela mantida ABERTA para a sua revisão. Nada foi enviado nem concluído. Feche a janela do Chrome quando terminar (limite: 60 min).',
+                        );
+                        await session.waitUntilClosed?.(60 * 60_000);
+                      },
+                    }
+                  : {}),
                 ...(options.revisar === true
                   ? {
                       review: async (item: ExecItemReport) => {

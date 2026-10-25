@@ -78,6 +78,54 @@ const statusOf = (jobId: number): string =>
   ).s;
 
 describe('executor assistido', () => {
+  it('retoma pendente_humano apenas por --item e planejar preserva esse estado', async () => {
+    const id = vaga(1);
+    await prepare();
+    const queueId = listQueue(db).find((item) => item.jobId === id)?.id ?? 0;
+    await exec(new FakeSession({ [url(1)]: okPage() }));
+    expect(statusOf(id)).toBe('pendente_humano');
+    expect((await exec(new FakeSession({}))).items).toEqual([]);
+    const planned = await exec(new FakeSession({ [url(1)]: okPage() }), {
+      itemId: queueId,
+      mode: 'planejar',
+    });
+    expect(planned.items).toHaveLength(1);
+    expect(statusOf(id)).toBe('pendente_humano');
+    const resumed = await exec(new FakeSession({ [url(1)]: okPage() }), { itemId: queueId });
+    expect(resumed.items[0]?.outcome).toBe('pronto_para_revisao');
+    expect(statusOf(id)).toBe('pendente_humano');
+    db.prepare("UPDATE autonomous_queue SET status = 'em_andamento' WHERE id = ?").run(queueId);
+    expect((await exec(new FakeSession({}), { itemId: queueId })).items).toEqual([]);
+  });
+
+  it('não anuncia pronto com botão desabilitado ou opção diferente de mesmo prefixo', async () => {
+    vaga(1);
+    vaga(2);
+    await prepare();
+    const run = await exec(
+      new FakeSession({
+        [url(1)]: okPage({ signals: signals({ submitEnabled: false }) }),
+        [url(2)]: okPage({ selectReadBack: 'Brasil - outra opção' }),
+      }),
+    );
+    expect(run.items.map((item) => item.outcome)).toEqual([
+      'campos_desconhecidos',
+      'campos_desconhecidos',
+    ]);
+    expect(run.items[1]?.filled.find((item) => item.label === 'País')?.ok).toBe(false);
+  });
+
+  it('bloqueia plataforma restrita antes de criar página, preservando os demais itens', async () => {
+    const blocked = vaga(1, { applyUrl: 'https://www.linkedin.com/jobs/view/123' });
+    vaga(2);
+    await prepare();
+    const session = new FakeSession({ [url(2)]: okPage() });
+    const run = await exec(session);
+    expect(run.items.find((item) => item.jobId === blocked)?.outcome).toBe('erro');
+    expect(session.calls.some((call) => call.includes('linkedin.com/jobs'))).toBe(false);
+    expect(run.items.find((item) => item.jobId !== blocked)?.outcome).toBe('pronto_para_revisao');
+  });
+
   it('lê a próxima vaga da fila, abre o link, preenche, anexa o currículo e PARA antes do envio', async () => {
     const id = vaga(1);
     await prepare();
@@ -94,6 +142,7 @@ describe('executor assistido', () => {
       'planejar_preenchimento',
       'preencher',
       'anexar_curriculo',
+      'verificacao_final',
       'captura_de_tela',
       'parar_antes_do_envio',
     ]);
@@ -103,7 +152,7 @@ describe('executor assistido', () => {
     // Só abre, lê, preenche, seleciona, anexa e fotografa: nada de envio.
     expect(
       session.calls.filter((c) =>
-        /^(goto|extractForm|fill|select|upload|screenshot|close)/.test(c),
+        /^(goto|extractForm|fill|select|choose|upload|screenshot|close)/.test(c),
       ),
     ).toHaveLength(session.calls.length);
     expect(session.calls.some((c) => /submit|click|enviar/i.test(c))).toBe(false);
@@ -130,6 +179,119 @@ describe('executor assistido', () => {
     expect(run.items[0]?.steps.find((s) => s.step === 'preencher')?.state).toBe('ok');
   });
 
+  it('relê o formulário depois de preencher: campos que aparecem dinamicamente também são tratados', async () => {
+    vaga(1);
+    await prepare();
+    const first = greenhouseLike();
+    const second = form([
+      ...first.fields,
+      field({
+        label: 'Nome da Universidade (caso não encontre, selecionar "outra")',
+        kind: 'combobox',
+        required: true,
+        options: ['Outra', 'USP'],
+      }),
+      field({ label: 'CPF', required: true }),
+    ]);
+    const session = new FakeSession({ [url(1)]: okPage({ form: [first, second] }) });
+    const run = await exec(session);
+    const item = run.items[0];
+    expect(item?.steps.map((s) => s.step)).toContain('reler_formulario');
+    expect(item?.filled.map((f) => f.label)).toContain(
+      'Nome da Universidade (caso não encontre, selecionar "outra")',
+    );
+    expect(session.calls.some((c) => c.startsWith('choose'))).toBe(true);
+    // O CPF novo é pendência (nunca digitado) e o resultado deixa de ser "pronto".
+    expect(item?.needsHuman.map((h) => h.label)).toEqual(['CPF']);
+    expect(item?.outcome).toBe('campos_desconhecidos');
+  });
+
+  it('aplica só as respostas confirmadas para ESTE item, confere o botão de envio e os erros, e não conclui nada', async () => {
+    const a = vaga(1);
+    const b = vaga(2);
+    await prepare();
+    const questions = form([
+      ...greenhouseLike().fields,
+      field({
+        label: 'Você autoriza a empresa a utilizar seus dados pessoais?',
+        kind: 'other',
+        required: true,
+      }),
+    ]);
+    const session = new FakeSession({
+      [url(1)]: okPage({ form: questions, signals: signals({ submitEnabled: true, errors: [] }) }),
+      [url(2)]: okPage({
+        form: questions,
+        signals: signals({ submitEnabled: false, errors: ['campo inválido: Email'] }),
+      }),
+    });
+    const itemA = listQueue(db).find((q) => q.jobId === a)?.id ?? 0;
+    const run = await exec(session, {
+      max: 2,
+      answersFor: (id) =>
+        id === itemA
+          ? [
+              {
+                question: 'autoriza a empresa a utilizar seus dados',
+                answer: 'Yes',
+                source: 'resposta confirmada por você',
+              },
+            ]
+          : [],
+    });
+    const first = run.items[0];
+    const second = run.items[1];
+    expect(first?.outcome).toBe('pronto_para_revisao');
+    expect(first?.final).toEqual({
+      submitLabel: 'Enviar candidatura',
+      submitEnabled: true,
+      errors: [],
+    });
+    expect(first?.filled.map((f) => f.label)).toContain(
+      'Você autoriza a empresa a utilizar seus dados pessoais?',
+    );
+    // A resposta não vale para outra vaga: no segundo item continua pendente; erros de validação aparecem.
+    expect(second?.needsHuman.map((h) => h.label)).toContain(
+      'Você autoriza a empresa a utilizar seus dados pessoais?',
+    );
+    expect(second?.final).toMatchObject({
+      submitEnabled: false,
+      errors: ['campo inválido: Email'],
+    });
+    expect(second?.steps.find((s) => s.step === 'verificacao_final')?.state).toBe('falhou');
+    expect(statusOf(a)).toBe('pendente_humano');
+    expect(statusOf(b)).toBe('pendente_humano');
+    expect(
+      db.prepare("SELECT COUNT(*) AS n FROM autonomous_queue WHERE status = 'concluida'").get(),
+    ).toEqual({ n: 0 });
+  });
+
+  it('no modo manter-aberto grava o registro ANTES de esperar você e depois não conclui nada', async () => {
+    const id = vaga(1);
+    await prepare();
+    const seen: string[] = [];
+    const session = new FakeSession({
+      [url(1)]: okPage({ afterText: 'Inscrição feita com sucesso!' }),
+    });
+    const run = await exec(session, {
+      holdOnly: true,
+      review: async () => {
+        // Durante a espera a execução já está registrada e a vaga continua com você.
+        seen.push(
+          (
+            db.prepare('SELECT COUNT(*) AS n FROM autonomous_executions').get() as { n: number }
+          ).n.toString(),
+        );
+        seen.push(statusOf(id));
+        await Promise.resolve();
+      },
+    });
+    expect(seen).toEqual(['1', 'pendente_humano']);
+    expect(run.items[0]?.outcome).toBe('pronto_para_revisao');
+    expect(statusOf(id)).toBe('pendente_humano');
+    expect(session.calls.at(-1)).toBe('close');
+  });
+
   it('registra cada execução com etapas e campos, sem e-mail ou telefone completos', async () => {
     vaga(1);
     await prepare();
@@ -147,7 +309,7 @@ describe('executor assistido', () => {
     expect(row.fields).not.toContain('pessoa.exemplo@example.com');
     expect(row.fields).not.toContain('99999-9999');
     expect(row.fields).toContain('pe…@example.com');
-    expect(JSON.parse(row.steps)).toHaveLength(10);
+    expect(JSON.parse(row.steps)).toHaveLength(11);
   });
 
   it('uma vaga bloqueada não impede as demais: login, CAPTCHA e campo desconhecido ficam com você e a execução segue', async () => {

@@ -70,10 +70,18 @@ currículo, confere cada valor na página, tira uma captura (`data/exec/`) e **p
 - **Nunca envia:** a interface do navegador do executor não tem "clicar" nem "enviar".
 - **Nunca marca concluída sem evidência:** com `--revisar` a janela fica aberta para você enviar; depois o executor
   procura a confirmação da plataforma e só então conclui, guardando o trecho como evidência.
-- **Nunca preenche:** autodeclaração (gênero, raça, deficiência, orientação...), aceite de termos/LGPD, disponibilidade
+- **Sem resposta específica confirmada para esta pergunta e este item, nunca preenche:** autodeclaração (gênero, raça, deficiência, orientação...), aceite de termos/LGPD, disponibilidade
   presencial, autorização de trabalho, texto livre, idiomas (mostra a dica do perfil) nem perguntas sem dado comprovado.
 - **Bloqueio de uma vaga não para as demais:** login, CAPTCHA visível, avaliação, campo obrigatório desconhecido ou erro
   viram `pendente_humano` com o motivo e a execução segue; vaga encerrada é cancelada com motivo.
+- **Formulários dinâmicos e listas personalizadas:** depois de preencher, o executor relê o formulário (até 3 passadas) e
+  trata os campos que apareceram; reconhece listas próprias (como a do BTG) e escolhe a opção de texto exato, inclusive
+  "Outra" quando o próprio formulário manda usar essa opção para instituição fora da lista. Se o componente for recriado
+  depois de um anexo, ele reidentifica o campo pelo rótulo e tenta de novo.
+- **Retomada:** `--item <id>` também aceita `pendente_humano`; a execução em lote continua selecionando só `pronta`. Planejar uma retomada preserva o estado pendente. Itens concluídos, cancelados ou em andamento não são retomados.
+- **Documentos de identificação (CPF, RG, CNH...) nunca são digitados pelo agente.**
+- **Respostas confirmadas por item:** `config/answers.json` (fora do Git; modelo em `config/answers.example.json`) vale só para o id da fila e o trecho da pergunta informado. Não autoriza envio nem é reaproveitado em outra vaga. Documentos continuam bloqueados; checkbox, radio, arquivo e texto livre exigem preenchimento humano.
+- **Plataformas restritas:** LinkedIn, Indeed, Catho, InfoJobs e Sólides ficam bloqueados no executor, inclusive em redirects e subrecursos. Veja [PLATAFORMAS.md](PLATAFORMAS.md).
 - Cada execução fica em `autonomous_executions` (etapas, campos com e-mail/telefone mascarados, currículo e captura).
 
 ```bash

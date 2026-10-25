@@ -33,6 +33,8 @@ const HTML = `<html><head><title>Candidatura</title></head><body>
   <label for="resume">Currículo *</label><input id="resume" name="resume" type="file" required style="display:none">
   <label for="pais">País *</label><select id="pais" name="pais" required><option>Selecione</option><option>Argentina</option><option>Brasil</option></select>
   <label for="sal">Pretensão salarial *</label><input id="sal" name="sal" required>
+  <div><span>CPF *</span><input placeholder="CPF"></div>
+  <div class="btg-select"><input type="text" readonly id="grau" placeholder="Grau" onclick="document.getElementById('lb').style.display='block'"><ul role="listbox" id="lb" style="display:none"><li onclick="document.getElementById('grau').value=this.textContent;document.getElementById('lb').style.display='none'">Graduação</li><li onclick="document.getElementById('grau').value=this.textContent;document.getElementById('lb').style.display='none'">Tecnólogo</li></ul></div>
   <fieldset><legend>Você tem disponibilidade para trabalhar presencialmente? *</legend>
     <label><input type="radio" name="pres" value="s"> Sim</label><label><input type="radio" name="pres" value="n"> Não</label></fieldset>
   <fieldset><legend>Autodeclaração voluntária</legend>
@@ -69,12 +71,18 @@ describe.skipIf(executable === undefined)('executor com navegador real (HTML loc
       'file:Currículo*',
       'select:País*',
       'text:Pretensão salarial*',
+      'text:CPF*',
+      'combobox:Grau',
       'radio:Você tem disponibilidade para trabalhar presencialmente?*',
       'select:Gênero',
       'checkbox:Li e aceito a política de privacidade*',
     ]);
     expect(form.fields.find((f) => f.kind === 'radio')?.options).toHaveLength(2);
     expect(form.fields.find((f) => f.label === 'País')?.options).toEqual(['Argentina', 'Brasil']);
+    expect(form.fields.find((f) => f.label === 'Grau')?.options).toEqual([
+      'Graduação',
+      'Tecnólogo',
+    ]);
     expect(form.fields.find((f) => f.label === 'Gênero')?.section).toBe(
       'Autodeclaração voluntária',
     );
@@ -118,11 +126,14 @@ describe.skipIf(executable === undefined)('executor com navegador real (HTML loc
       'Pretensão salarial',
     ]);
     expect(plan.needsHuman.map((h) => h.category)).toEqual([
+      'sensivel',
       'confirmacao',
       'sensivel',
       'consentimento',
     ]);
     expect(await page.select(byLabel('País'), 'Brasil')).toBe('Brasil');
+    // Lista personalizada (como a do BTG): abre a lista e escolhe a opção pelo texto exato, sem tocar em botões.
+    expect(await page.choose(byLabel('Grau'), 'Tecnólogo')).toBe('Tecnólogo');
     expect(await page.upload(byLabel('Currículo'), pdf)).toBe('cv.pdf');
     await page.close();
   });

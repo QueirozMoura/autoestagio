@@ -3,12 +3,14 @@ import type { FormModel, PageSignals } from '../../src/executor/types.js';
 
 export interface FakePage {
   signals: PageSignals;
-  form: FormModel | null;
+  /** Uma lista = cada releitura do formulário devolve o próximo (campos dinâmicos); a última se repete. */
+  form: FormModel | FormModel[] | null;
   /** Texto depois que "você" envia (para a evidência). */
   afterText?: string;
   failOn?: 'goto' | 'fill';
   /** Máscara nacional: lê o prefixo +55 como DDD e devolve algo diferente do esperado. */
   nationalPhoneMask?: boolean;
+  selectReadBack?: string;
 }
 
 /** Navegador simulado: registra cada operação e NUNCA envia nada (a interface nem tem essa operação). */
@@ -23,6 +25,7 @@ export class FakeSession implements BrowserSession {
     const calls = this.calls;
     const values = this.values;
     let current: FakePage | undefined;
+    let reads = 0;
     const page = {
       goto: (url: string) => {
         calls.push(`goto ${url}`);
@@ -35,7 +38,11 @@ export class FakeSession implements BrowserSession {
       signals: () => Promise.resolve((current as FakePage).signals),
       extractForm: () => {
         calls.push('extractForm');
-        return Promise.resolve((current as FakePage).form as FormModel);
+        const forms = (current as FakePage).form;
+        const model = Array.isArray(forms)
+          ? (forms[Math.min(reads++, forms.length - 1)] as FormModel)
+          : forms;
+        return Promise.resolve(model as FormModel);
       },
       fill: (selector: string, value: string) => {
         calls.push(`fill ${selector}`);
@@ -47,6 +54,11 @@ export class FakeSession implements BrowserSession {
       },
       select: (selector: string, option: string) => {
         calls.push(`select ${selector}`);
+        values.set(selector, option);
+        return Promise.resolve(current?.selectReadBack ?? option);
+      },
+      choose: (selector: string, option: string) => {
+        calls.push(`choose ${selector}`);
         values.set(selector, option);
         return Promise.resolve(option);
       },

@@ -1,4 +1,10 @@
 export {
+  DEFAULT_ANSWERS_PATH,
+  answersSchema,
+  loadAnswers,
+  type ConfirmedAnswer,
+} from './answers.js';
+export {
   ApplicantError,
   DEFAULT_APPLICANT_PATH,
   applicantSchema,

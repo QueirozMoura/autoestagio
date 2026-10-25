@@ -12,6 +12,8 @@ export interface PlanContext {
   applicant: Applicant;
   /** Pretensão salarial mensal (da política). */
   salary: number;
+  /** Respostas que VOCÊ confirmou para esta candidatura (config/answers.json). */
+  answers?: { question: string; answer: string; source: string }[];
   /** Currículo aprovado a anexar (caminho local), se houver. */
   cv: { path: string; label: string } | null;
   /** Fatos do perfil aprovado (formação e idiomas) para preencher campos de formação e dar dicas nas perguntas de idioma. */
@@ -20,6 +22,8 @@ export interface PlanContext {
     institution: string;
     graduationYear: number;
     graduationMonth?: number | undefined;
+    /** Tipo da graduação em andamento no perfil (ex.: tecnologo, bacharelado). */
+    degreeType?: string | undefined;
     languages: { language: string; level: string; scope?: string | undefined }[];
   };
 }
@@ -29,6 +33,9 @@ const norm = (value: string): string =>
 
 const SENSITIVE =
   /(genero|gender|raca|race|etnia|ethnic|cor\/raca|pronome|pronoun|orientacao sexual|sexual orientation|deficiencia|disability|veteran|lgbt|transgen|autodeclar|self-?identif|voluntary|eeo|diversidade|diversity survey|indigena|hispanic)/;
+/** Documentos de identificação: o agente nunca digita (nem tem esse dado). */
+const DOCUMENT =
+  /(^|[^a-z])(cpf|rg|cnh|passaporte|passport|ssn|documento de identidade|carteira de identidade|titulo de eleitor)([^a-z]|$)/;
 const CONSENT =
   /(li e (aceito|concordo)|aceito (os )?termos|concordo com|politica de privacidade|privacy|lgpd|consent|termos de uso|terms (of|and)|i (agree|accept)|estou ciente|autoriza.*dados pessoais|utilizar seus dados|compartilhar (as )?informacoes|estou de acordo)/;
 const LANGUAGE =
@@ -53,6 +60,25 @@ const nationalPhones = (e164: string): string[] => {
         `${match[1] ?? ''}${match[2] ?? ''}${match[3] ?? ''}`,
       ];
 };
+
+const MONTHS = [
+  'janeiro',
+  'fevereiro',
+  'marco',
+  'abril',
+  'maio',
+  'junho',
+  'julho',
+  'agosto',
+  'setembro',
+  'outubro',
+  'novembro',
+  'dezembro',
+];
+const monthForms = (month: number): string[] =>
+  [String(month).padStart(2, '0'), MONTHS[month - 1] ?? ''].filter((m) => m !== '');
+const degreeWord = (type: string): string =>
+  ({ tecnologo: 'Tecnólogo', bacharelado: 'Graduação', licenciatura: 'Graduação' })[type] ?? '';
 
 const formatPhone = (e164: string): string => {
   const match = /^\+55(\d{2})(9?\d{4})(\d{4})$/.exec(e164);
@@ -107,10 +133,27 @@ function textIntent(field: FieldModel, ctx: PlanContext): Intent | null {
     return { value: last, source: 'applicant.fullName' };
   if (
     /(nome completo|full name|your name|seu nome|^nome\b|^name\b)/.test(t) &&
-    !/(empresa|company|escola|school|pai|mae)/.test(t)
+    !/(empresa|company|escola|school|pai|mae|universidade|faculdade|instituicao|institution|university|curso|disciplina)/.test(
+      t,
+    )
   )
     return { value: applicant.fullName, source: 'applicant.fullName' };
   if (ctx.profile !== undefined) {
+    if (
+      /(mes de conclusao|graduation month|month of graduation)/.test(t) &&
+      ctx.profile.graduationMonth !== undefined
+    )
+      return {
+        value: String(ctx.profile.graduationMonth),
+        source: 'perfil.education.expectedGraduationMonth',
+        alternatives: monthForms(ctx.profile.graduationMonth),
+      };
+    if (
+      /^(grau|degree|escolaridade|nivel de formacao|nivel de escolaridade)\b/.test(t) &&
+      ctx.profile.degreeType !== undefined &&
+      degreeWord(ctx.profile.degreeType) !== ''
+    )
+      return { value: degreeWord(ctx.profile.degreeType), source: 'perfil.education.degreeType' };
     if (/(ano de conclusao|graduation year|year of graduation|ano de formatura)/.test(t))
       return {
         value: String(ctx.profile.graduationYear),
@@ -118,7 +161,7 @@ function textIntent(field: FieldModel, ctx: PlanContext): Intent | null {
       };
     if (/(instituicao|universidade|faculdade|institution|university|\bcollege\b)/.test(t))
       return { value: ctx.profile.institution, source: 'perfil.education.institution' };
-    if (/^(curso|course|major|field of study|area de estudo)\b/.test(t))
+    if (/^(curso|course|major|field of study|area de estudo|disciplina)\b/.test(t))
       return { value: ctx.profile.course, source: 'perfil.education.course' };
   }
   if (/(cidade|^city\b|\bcity\b|municipio)/.test(t) && !/(pais|country)/.test(t))
@@ -164,7 +207,59 @@ export function planForm(form: FormModel, ctx: PlanContext): FillPlan {
     const t = text(field);
     const name = field.label || field.name || '(sem rótulo)';
 
+    // 0) Resposta que você confirmou para ESTA pergunta nesta candidatura (nunca vale para documentos).
+    const confirmed = DOCUMENT.test(t)
+      ? undefined
+      : ctx.answers?.find((a) => t.includes(norm(a.question)));
+    if (confirmed !== undefined) {
+      if (
+        field.kind === 'radio' ||
+        field.kind === 'checkbox' ||
+        field.kind === 'file' ||
+        field.kind === 'textarea'
+      )
+        human(
+          field,
+          'confirmacao',
+          'há resposta confirmada por você, mas este tipo de campo o executor não marca: responda na página',
+        );
+      else if (
+        field.options.length > 0 &&
+        !field.options.some((o) => norm(o) === norm(confirmed.answer))
+      )
+        human(
+          field,
+          'confirmacao',
+          `a opção "${confirmed.answer}" não existe na lista: inconsistência, nada foi alterado`,
+        );
+      else
+        add(
+          field,
+          field.kind === 'select'
+            ? 'select'
+            : field.kind === 'text' ||
+                field.kind === 'email' ||
+                field.kind === 'tel' ||
+                field.kind === 'url' ||
+                field.kind === 'number'
+              ? 'fill'
+              : 'choose',
+          {
+            value: confirmed.answer,
+            source: confirmed.source,
+          },
+        );
+      continue;
+    }
     // 1) O que NUNCA se preenche sozinho.
+    if (DOCUMENT.test(t)) {
+      human(
+        field,
+        'sensivel',
+        'documento de identificação (ex.: CPF): nunca é preenchido pelo agente; digite você',
+      );
+      continue;
+    }
     if (SENSITIVE.test(t)) {
       human(field, 'sensivel', 'autodeclaração/dado sensível: nunca é preenchido nem presumido');
       continue;
@@ -230,7 +325,8 @@ export function planForm(form: FormModel, ctx: PlanContext): FillPlan {
     }
     const intent = textIntent(field, ctx);
     if (intent !== null) {
-      if (field.kind === 'select') {
+      if (field.kind === 'select' || field.kind === 'combobox') {
+        const op = field.kind === 'combobox' ? 'choose' : 'select';
         const wanted =
           intent.source === 'applicant.country'
             ? ['Brasil', 'Brazil']
@@ -238,13 +334,25 @@ export function planForm(form: FormModel, ctx: PlanContext): FillPlan {
               ? [ctx.applicant.city]
               : [intent.value];
         const option = optionMatching(field, wanted);
-        if (option === undefined)
+        const other = field.options.find((o) => norm(o) === 'outra' || norm(o) === 'outro');
+        if (option !== undefined) add(field, op, { ...intent, value: option });
+        else if (
+          intent.source === 'perfil.education.institution' &&
+          other !== undefined &&
+          /(selecion\w+\W{0,3}(a\W{0,3})?outra)/.test(norm(field.label))
+        )
+          // O próprio formulário instrui: instituição fora da lista → "Outra". O dado (Uniasselvi) é comprovado.
+          add(field, op, {
+            value: other,
+            source:
+              'perfil.education.institution (fora da lista; o formulário manda escolher "Outra")',
+          });
+        else
           human(
             field,
             'desconhecido',
             'a lista não tem uma opção que corresponda ao dado comprovado',
           );
-        else add(field, 'select', { ...intent, value: option });
       } else if (field.value !== '' && norm(field.value) !== norm(intent.value)) {
         human(field, 'confirmacao', 'o campo já vem preenchido com outro valor: não é sobrescrito');
       } else if (field.kind === 'textarea') {

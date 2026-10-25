@@ -12,6 +12,8 @@ export interface PageDriver {
   fill(selector: string, value: string): Promise<string>;
   /** Escolhe a opção pelo texto e devolve o texto selecionado. */
   select(selector: string, optionLabel: string): Promise<string>;
+  /** Escolhe uma opção de uma lista personalizada (abre a lista e escolhe a opção pelo texto exato). */
+  choose(selector: string, optionLabel: string): Promise<string>;
   /** Anexa o arquivo e devolve o nome que a página registrou. */
   upload(selector: string, filePath: string): Promise<string>;
   screenshot(path: string): Promise<void>;
@@ -22,6 +24,8 @@ export interface PageDriver {
 
 export interface BrowserSession {
   newPage(): Promise<PageDriver>;
+  /** Espera você fechar a janela (ou o prazo acabar). Resolve true se a janela foi fechada. */
+  waitUntilClosed?(timeoutMs: number): Promise<boolean>;
   close(): Promise<void>;
 }
 
@@ -43,5 +47,19 @@ export function assertSafeUrl(raw: string): URL {
   if (url.protocol !== 'https:') throw new ExecutorError('A candidatura só abre links HTTPS.');
   if (url.username !== '' || url.password !== '')
     throw new ExecutorError('O link não pode conter credenciais.');
+  const host = url.hostname.toLowerCase().replace(/\.$/, '');
+  const restricted = [
+    'linkedin.com',
+    'indeed.com',
+    'indeed.com.br',
+    'catho.com.br',
+    'infojobs.com.br',
+    'solides.com.br',
+    'solides.jobs',
+  ];
+  if (restricted.some((domain) => host === domain || host.endsWith(`.${domain}`)))
+    throw new ExecutorError(
+      'Plataforma restrita: acesso automatizado indisponível; use o fluxo manual.',
+    );
   return url;
 }

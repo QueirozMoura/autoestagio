@@ -47,6 +47,9 @@ export const signals = (over: Partial<PageSignals> = {}): PageSignals => ({
   captchaPresent: true,
   fieldCount: 5,
   submitLabels: ['Enviar candidatura'],
+  submitLabel: 'Enviar candidatura',
+  submitEnabled: true,
+  errors: [],
   ...over,
 });
 

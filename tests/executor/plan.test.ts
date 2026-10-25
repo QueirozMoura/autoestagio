@@ -201,4 +201,136 @@ describe('plano de preenchimento', () => {
       ['Ano de conclusão', '2028', 'perfil.education.expectedGraduationYear'],
     ]);
   });
+
+  it('CPF e outros documentos de identificação nunca são digitados pelo agente', () => {
+    const p = plan(
+      form([field({ label: 'CPF', required: true }), field({ label: 'Número do RG' })]),
+    );
+    expect(p.actions).toEqual([]);
+    expect(p.needsHuman.map((h) => [h.label, h.category])).toEqual([
+      ['CPF', 'sensivel'],
+      ['Número do RG', 'sensivel'],
+    ]);
+  });
+
+  it('grau, mês e instituição saem do perfil: lista personalizada usa "choose"; instituição fora da lista usa "Outra"', () => {
+    const profile = {
+      course: 'Análise e Desenvolvimento de Sistemas',
+      institution: 'Uniasselvi',
+      graduationYear: 2028,
+      graduationMonth: 6,
+      degreeType: 'tecnologo',
+      languages: [],
+    };
+    const p = planForm(
+      form([
+        field({
+          label: 'Grau',
+          kind: 'combobox',
+          required: true,
+          options: ['Graduação', 'Tecnólogo', 'Mestrado'],
+        }),
+        field({ label: 'Mês de conclusão', required: true }),
+        field({
+          label: 'Nome da Universidade (caso não encontre, selecionar "outra")',
+          kind: 'combobox',
+          required: true,
+          options: ['Outra', 'USP', 'PUC'],
+        }),
+        field({
+          label: 'Disciplina',
+          kind: 'combobox',
+          required: true,
+          options: ['Engenharia', 'Direito'],
+        }),
+      ]),
+      { ...ctx, profile },
+    );
+    expect(p.actions.map((a) => [a.label.slice(0, 12), a.op, a.value])).toEqual([
+      ['Grau', 'choose', 'Tecnólogo'],
+      ['Mês de concl', 'fill', '6'],
+      ['Nome da Univ', 'choose', 'Outra'],
+    ]);
+    expect(p.actions[1]?.alternatives).toEqual(['06', 'junho']);
+    expect(p.actions[2]?.source).toContain('fora da lista');
+    expect(p.needsHuman.map((h) => h.label)).toEqual(['Disciplina']);
+  });
+
+  it('respostas confirmadas por você valem só para a pergunta indicada, com a origem registrada', () => {
+    const answers = [
+      {
+        question: 'autoriza a artefact utilizar seus dados pessoais',
+        answer: 'Yes',
+        source: 'resposta confirmada por você em 24/10/2026',
+      },
+      {
+        question: 'nivel de proficiencia em ingles',
+        answer: 'Intermediate',
+        source: 'resposta confirmada por você em 24/10/2026',
+      },
+      {
+        question: 'nivel de proficiencia em espanhol',
+        answer: 'Basic',
+        source: 'resposta confirmada por você em 24/10/2026',
+      },
+    ];
+    const p = planForm(
+      form([
+        field({
+          label: 'Você autoriza a Artefact utilizar seus dados pessoais conforme os termos abaixo?',
+          kind: 'other',
+          required: true,
+        }),
+        field({
+          label: 'Qual o seu nível de proficiência em inglês?',
+          kind: 'other',
+          required: true,
+        }),
+        field({
+          label: 'Qual seu nível de proficiência em espanhol?',
+          kind: 'other',
+          required: true,
+        }),
+        field({
+          label: 'Qual o seu nível de proficiência em francês?',
+          kind: 'other',
+          required: true,
+        }),
+        field({ label: 'CPF', required: true }),
+      ]),
+      { ...ctx, answers },
+    );
+    expect(p.actions.map((a) => [a.op, a.value])).toEqual([
+      ['choose', 'Yes'],
+      ['choose', 'Intermediate'],
+      ['choose', 'Basic'],
+    ]);
+    expect(p.actions.every((a) => a.source.startsWith('resposta confirmada por você'))).toBe(true);
+    // O que você não confirmou continua com você, e documento nunca é preenchido.
+    expect(p.needsHuman.map((h) => h.label)).toEqual([
+      'Qual o seu nível de proficiência em francês?',
+      'CPF',
+    ]);
+  });
+
+  it('resposta confirmada com opção inexistente na lista é inconsistência: nada é preenchido', () => {
+    const p = planForm(
+      form([
+        field({
+          label: 'Qual seu nível de proficiência em espanhol?',
+          kind: 'combobox',
+          required: true,
+          options: ['Basic', 'Fluent'],
+        }),
+      ]),
+      {
+        ...ctx,
+        answers: [
+          { question: 'nivel de proficiencia em espanhol', answer: 'Beginner', source: 'x' },
+        ],
+      },
+    );
+    expect(p.actions).toEqual([]);
+    expect(p.needsHuman[0]?.why).toContain('não existe na lista');
+  });
 });

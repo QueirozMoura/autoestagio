@@ -34,6 +34,10 @@ export interface ExecOptions {
   outputDir: string;
   /** Pasta dos PDFs de currículo por variante. */
   cvDir: string;
+  /** Respostas confirmadas por você, por item da fila (config/answers.json). */
+  answersFor?: (queueId: number) => { question: string; answer: string; source: string }[];
+  /** Só mantém a janela aberta para a sua revisão: não procura confirmação nem conclui nada. */
+  holdOnly?: boolean;
   /** Depois de preencher, entrega a página a você; devolve true se aguardou a sua decisão. */
   review?: (item: ExecItemReport, page: PageDriver) => Promise<void>;
   now?: () => Date;
@@ -55,6 +59,8 @@ export interface ExecItemReport {
   notes: string[];
   screenshot: string | null;
   evidence: string | null;
+  /** Estado da página depois de preencher: botão de envio (só leitura) e erros de validação. */
+  final: { submitLabel: string | null; submitEnabled: boolean | null; errors: string[] } | null;
 }
 
 export interface ExecRunReport {
@@ -65,6 +71,7 @@ export interface ExecRunReport {
 
 interface QueueRow {
   id: number;
+  status: 'pronta' | 'pendente_humano';
   job_id: number;
   cv_variant: string | null;
   company: string | null;
@@ -93,22 +100,24 @@ const pickNext = (
   (
     db
       .prepare(
-        `SELECT q.id, q.job_id, q.cv_variant, j.company, j.title, j.url, j.apply_url
+        `SELECT q.id, q.status, q.job_id, q.cv_variant, j.company, j.title, j.url, j.apply_url
            FROM autonomous_queue q JOIN jobs j ON j.id = q.job_id
-          WHERE q.flow = 'assistido' AND q.status = 'pronta' AND (@id IS NULL OR q.id = @id)
+          WHERE q.flow = 'assistido'
+            AND (q.status = 'pronta' OR (@id IS NOT NULL AND q.status = 'pendente_humano'))
+            AND (@id IS NULL OR q.id = @id)
           ORDER BY q.priority`,
       )
       .all({ id: itemId ?? null }) as QueueRow[]
   ).find((row) => !taken.has(row.id));
 
 /** Reserva o item (pronta → em_andamento) de forma atômica: dois executores nunca pegam o mesmo. */
-function reserve(db: Db, queueId: number, at: Date): boolean {
+function reserve(db: Db, row: QueueRow, at: Date): boolean {
   return (
     db
       .prepare(
-        "UPDATE autonomous_queue SET status = 'em_andamento', updated_at = ? WHERE id = ? AND status = 'pronta'",
+        "UPDATE autonomous_queue SET status = 'em_andamento', updated_at = ? WHERE id = ? AND status = ?",
       )
-      .run(at.toISOString(), queueId).changes === 1
+      .run(at.toISOString(), row.id, row.status).changes === 1
   );
 }
 
@@ -123,7 +132,7 @@ export async function runExecutor(options: ExecOptions): Promise<ExecRunReport> 
     const row = pickNext(db, options.itemId, taken);
     if (row === undefined) break;
     taken.add(row.id);
-    if (!reserve(db, row.id, clock())) continue;
+    if (!reserve(db, row, clock())) continue;
     reports.push(await processItem(options, row));
     if (options.itemId !== undefined) break;
   }
@@ -158,6 +167,7 @@ async function processItem(options: ExecOptions, row: QueueRow): Promise<ExecIte
     notes: [],
     screenshot: null,
     evidence: null,
+    final: null,
   };
   const step = (name: string, state: Step['state'], detail: string): void => {
     steps.push({ step: name, state, detail });
@@ -206,20 +216,21 @@ async function processItem(options: ExecOptions, row: QueueRow): Promise<ExecIte
       };
       step('selecionar_curriculo', 'ok', `${cv.label} (${cv.note}; sha ${cv.sha256.slice(0, 8)})`);
     }
-    const plan = planForm(model, {
+    const planContext = {
       applicant,
       salary: options.salary,
       cv: cv === null ? null : { path: cv.path, label: cv.label },
+      answers: options.answersFor?.(row.id) ?? [],
       profile: {
         course: options.profile.education.course,
         institution: options.profile.education.institution,
         graduationYear: options.profile.education.expectedGraduationYear,
         graduationMonth: options.profile.education.expectedGraduationMonth,
+        degreeType: options.profile.education.degreeType,
         languages: options.profile.languages ?? [],
       },
-    });
-    report.needsHuman = plan.needsHuman;
-    report.skipped = plan.skipped;
+    };
+    let plan = planForm(model, planContext);
     report.planned = plan.actions.map((a) => ({
       label: a.label,
       source: a.source,
@@ -231,15 +242,55 @@ async function processItem(options: ExecOptions, row: QueueRow): Promise<ExecIte
       `${plan.actions.length} a preencher; ${plan.needsHuman.length} com você; ${plan.skipped.length} opcional(is) em branco`,
     );
 
-    if (options.mode === 'preparar')
+    if (options.mode === 'preparar') {
       await apply(page, model, plan.actions, report, cv, applicant, step);
-    else step('preencher', 'pulado', 'modo planejar: nada foi preenchido nem anexado');
+      // Formulários dinâmicos: depois de preencher, releia; campos novos que apareceram também são tratados.
+      const done = new Set(plan.actions.map((a) => `${a.source}|${a.label}`));
+      for (let pass = 2; pass <= 3; pass++) {
+        const reread = await page.extractForm();
+        const next = planForm(reread, planContext);
+        const fresh = next.actions.filter((a) => !done.has(`${a.source}|${a.label}`));
+        const doneLabels = new Set([...done].map((d) => d.split('|').slice(1).join('|')));
+        plan = {
+          actions: plan.actions,
+          needsHuman: next.needsHuman.filter((h) => !doneLabels.has(h.label)),
+          skipped: next.skipped.filter((sk) => !doneLabels.has(sk.label)),
+        };
+        if (fresh.length === 0) break;
+        step(
+          'reler_formulario',
+          'ok',
+          `passada ${pass}: ${fresh.length} campo(s) novo(s) apareceram`,
+        );
+        await apply(page, reread, fresh, report, cv, applicant, step);
+        for (const a of fresh) done.add(`${a.source}|${a.label}`);
+      }
+    } else step('preencher', 'pulado', 'modo planejar: nada foi preenchido nem anexado');
+    report.needsHuman = plan.needsHuman;
+    report.skipped = plan.skipped;
 
     const missing = plan.needsHuman.filter((h) => h.required);
     report.outcome = missing.length > 0 ? 'campos_desconhecidos' : 'pronto_para_revisao';
     if (report.filled.some((f) => !f.ok)) {
       report.outcome = 'campos_desconhecidos';
       report.notes.push('algum campo não aceitou o valor: revise na página');
+    }
+    if (options.mode === 'preparar') {
+      const after = await page.signals();
+      report.final = {
+        submitLabel: after.submitLabel,
+        submitEnabled: after.submitEnabled,
+        errors: after.errors,
+      };
+      step(
+        'verificacao_final',
+        after.errors.length === 0 ? 'ok' : 'falhou',
+        `botão de envio: ${after.submitEnabled === null ? 'não encontrado' : after.submitEnabled ? 'HABILITADO' : 'desabilitado'}; ${after.errors.length} erro(s) de validação visíveis`,
+      );
+      if (after.errors.length > 0 || after.submitEnabled === false)
+        report.outcome = 'campos_desconhecidos';
+      if (after.errors.length > 0)
+        report.notes.push(`validação da página: ${after.errors.join(' | ')}`);
     }
     if (options.mode === 'preparar') {
       const shot = join(
@@ -251,7 +302,7 @@ async function processItem(options: ExecOptions, row: QueueRow): Promise<ExecIte
       step('captura_de_tela', 'ok', 'salva em data/ (pode conter seus dados)');
     }
     step('parar_antes_do_envio', 'ok', 'o executor não envia: o envio é seu');
-    if (options.review !== undefined && options.mode === 'preparar') {
+    if (options.review !== undefined && options.mode === 'preparar' && options.holdOnly !== true) {
       await options.review(report, page);
       const confirmation = findConfirmation(await page.text());
       if (confirmation !== null) {
@@ -269,7 +320,15 @@ async function processItem(options: ExecOptions, row: QueueRow): Promise<ExecIte
     step('erro', 'falhou', message.slice(0, 200));
     report.notes.push(message.slice(0, 200));
   }
-  return finish(options, row, report, startedAt, page);
+  const hold =
+    options.holdOnly === true && options.mode === 'preparar' && report.outcome !== 'erro';
+  const result = await finish(options, row, report, startedAt, page, hold);
+  if (hold && page !== undefined && options.review !== undefined) {
+    // O registro já foi gravado; agora a janela fica aberta para a sua revisão (nada é concluído).
+    await options.review(report, page);
+    await page.close();
+  }
+  return result;
 }
 
 const digits = (value: string): string => value.replace(/\D/g, '');
@@ -277,15 +336,20 @@ const digits = (value: string): string => value.replace(/\D/g, '');
 /** O que a página mostra equivale ao que se quis escrever? Telefone aceita com ou sem o código do país. */
 function matches(action: FillAction, readBack: string): boolean {
   if (action.op === 'upload') return readBack !== '';
-  if (action.op === 'select')
-    return readBack.toLowerCase().includes(action.value.toLowerCase().slice(0, 4));
+  if (action.op === 'select' || action.op === 'choose')
+    return readBack.trim().toLowerCase() === action.value.trim().toLowerCase();
   const wanted = digits(action.value);
   if (action.source === 'applicant.phone') {
     const national = wanted.startsWith('55') ? wanted.slice(2) : wanted;
     return national !== '' && digits(readBack).endsWith(national);
   }
   if (wanted !== '' && /\d/.test(action.value) && digits(readBack) === wanted) return true;
-  return readBack.trim().toLowerCase() === action.value.trim().toLowerCase();
+  const norm = (v: string): string => v.trim().toLowerCase();
+  return [action.value, ...(action.alternatives ?? [])].some(
+    (candidate) =>
+      norm(candidate) === norm(readBack) ||
+      (digits(candidate) !== '' && digits(candidate) === digits(readBack)),
+  );
 }
 
 async function apply(
@@ -302,7 +366,7 @@ async function apply(
     const field = byId.get(action.fieldId);
     if (field === undefined) continue;
     const shown = action.op === 'upload' ? (cv?.label ?? '') : displayValue(action, applicant);
-    try {
+    const attemptOn = async (selector: string): Promise<{ readBack: string; ok: boolean }> => {
       let readBack = '';
       let ok = false;
       const attempts =
@@ -310,13 +374,28 @@ async function apply(
       for (const attempt of attempts) {
         readBack =
           action.op === 'upload'
-            ? await page.upload(field.selector, attempt)
+            ? await page.upload(selector, attempt)
             : action.op === 'select'
-              ? await page.select(field.selector, attempt)
-              : await page.fill(field.selector, attempt);
+              ? await page.select(selector, attempt)
+              : action.op === 'choose'
+                ? await page.choose(selector, attempt)
+                : await page.fill(selector, attempt);
         ok = matches(action, readBack);
         if (ok) break;
       }
+      return { readBack, ok };
+    };
+    try {
+      let result: { readBack: string; ok: boolean };
+      try {
+        result = await attemptOn(field.selector);
+      } catch (first) {
+        // Alguns formulários recriam os componentes depois de um anexo/alteração: reidentifica o campo pelo rótulo.
+        const again = (await page.extractForm()).fields.find((f) => f.label === field.label);
+        if (again === undefined) throw first;
+        result = await attemptOn(again.selector);
+      }
+      const { readBack, ok } = result;
       report.filled.push({
         label: action.label,
         source: action.source,
@@ -324,12 +403,12 @@ async function apply(
         readBack: action.masked ? '(conferido)' : readBack,
         ok,
       });
-    } catch {
+    } catch (error) {
       report.filled.push({
         label: action.label,
         source: action.source,
         value: shown,
-        readBack: '',
+        readBack: `(erro: ${(error as Error).message.split('\n')[0]?.slice(0, 90) ?? 'falha'})`,
         ok: false,
       });
     }
@@ -354,10 +433,11 @@ async function finish(
   report: ExecItemReport,
   startedAt: Date,
   page: PageDriver | undefined,
+  keepOpen = false,
 ): Promise<ExecItemReport> {
   const { db } = options;
   const at = (options.now ?? (() => new Date()))();
-  if (page !== undefined) await page.close();
+  if (page !== undefined && !keepOpen) await page.close();
   db.prepare(
     `INSERT INTO autonomous_executions
        (queue_id, mode, outcome, started_at, finished_at, steps, fields, cv_label, cv_sha256, screenshot, evidence)
@@ -400,8 +480,8 @@ async function finish(
   else if (options.mode === 'planejar')
     // Planejar não consome o item: ele volta para a fila exatamente como estava.
     db.prepare(
-      "UPDATE autonomous_queue SET status = 'pronta', updated_at = ? WHERE id = ? AND status = 'em_andamento'",
-    ).run(at.toISOString(), row.id);
+      "UPDATE autonomous_queue SET status = ?, updated_at = ? WHERE id = ? AND status = 'em_andamento'",
+    ).run(row.status, at.toISOString(), row.id);
   else setQueueStatus(db, row.id, { status: 'pendente_humano', notes: note }, at);
   return report;
 }

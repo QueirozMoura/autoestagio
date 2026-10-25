@@ -1,0 +1,11 @@
+{
+  "queue": {
+    "3": [
+      {
+        "question": "trecho da pergunta sem acentos",
+        "answer": "texto exato da opção",
+        "confirmedAt": "data e onde você confirmou"
+      }
+    ]
+  }
+}

@@ -40,6 +40,10 @@ export function findBrowser(env: NodeJS.ProcessEnv = process.env): string {
 interface SelectLike {
   selectedOptions: ArrayLike<{ textContent: string | null }>;
 }
+interface NodeLike {
+  parentElement: NodeLike | null;
+  textContent: string | null;
+}
 interface FilesLike {
   files?: ArrayLike<{ name: string }> | null;
 }
@@ -82,6 +86,34 @@ export class PlaywrightPage implements PageDriver {
       const select = el as unknown as SelectLike;
       return select.selectedOptions[0]?.textContent?.trim() ?? '';
     });
+  }
+
+  async choose(selector: string, optionLabel: string): Promise<string> {
+    const field = this.page.locator(selector).first();
+    await field.scrollIntoViewIfNeeded({ timeout: 5_000 });
+    await field.click({ timeout: 5_000 });
+    // Só uma opção da lista: nunca um botão do formulário.
+    const option = this.page
+      .locator('li, [role=option]')
+      .filter({
+        hasText: new RegExp(`^\\s*${optionLabel.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*$`),
+      })
+      .first();
+    await option.click({ timeout: 5_000 });
+    await this.page.waitForTimeout(400);
+    const typed = await field.inputValue({ timeout: 3_000 }).catch(() => '');
+    if (typed !== '') return typed;
+    // Listas que mostram a escolha fora do <input> (ex.: react-select): lê o valor exibido no próprio componente.
+    return field
+      .evaluate((el, label) => {
+        let node = (el as unknown as NodeLike).parentElement;
+        for (let i = 0; i < 4 && node; i += 1, node = node.parentElement) {
+          const text = (node.textContent ?? '').replace(/\s+/g, ' ').trim();
+          if (text.includes(label) && text.length < 200) return label;
+        }
+        return '';
+      }, optionLabel)
+      .catch(() => '');
   }
 
   async upload(selector: string, filePath: string): Promise<string> {
@@ -136,11 +168,32 @@ export async function launchSession(options: LaunchOptions): Promise<BrowserSess
     timezoneId: 'America/Sao_Paulo',
     viewport: { width: 1280, height: 900 },
     acceptDownloads: false,
+    serviceWorkers: 'block',
+  });
+  // Também bloqueia redirects, iframes e subrecursos antes da requisição ao host restrito.
+  await context.route('**/*', async (route) => {
+    try {
+      if (/^https?:/.test(route.request().url())) assertSafeUrl(route.request().url());
+    } catch {
+      await route.abort('blockedbyclient');
+      return;
+    }
+    await route.continue();
   });
   return {
     newPage: async () => new PlaywrightPage(await context.newPage()),
     close: async () => {
       await context.close().catch(() => undefined);
     },
+    waitUntilClosed: (timeoutMs: number) =>
+      new Promise<boolean>((resolve) => {
+        const timer = setTimeout(() => {
+          resolve(false);
+        }, timeoutMs);
+        context.on('close', () => {
+          clearTimeout(timer);
+          resolve(true);
+        });
+      }),
   };
 }
